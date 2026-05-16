@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 
 const THEME = {
   bg: "#0D1117", surface: "#161B22", border: "#21262D",
