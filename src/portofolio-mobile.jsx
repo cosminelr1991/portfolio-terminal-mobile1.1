@@ -1,10 +1,24 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useContext, createContext } from "react";
 
-const THEME = {
+// ── THEME SYSTEM ──────────────────────────────────────────────────────────────
+const DARK = {
   bg: "#0D1117", surface: "#161B22", border: "#21262D",
   text: "#C9D1D9", dim: "#8B949E", gold: "#E8C468",
   blue: "#4A9EFF", green: "#2ECC71", red: "#E74C3C",
+  inputBg: "#0D1117",
 };
+const LIGHT = {
+  bg: "#F6F8FA", surface: "#FFFFFF", border: "#D0D7DE",
+  text: "#1F2328", dim: "#636C76", gold: "#B08800",
+  blue: "#0969DA", green: "#1A7F37", red: "#CF222E",
+  inputBg: "#FFFFFF",
+};
+
+const ThemeCtx = createContext({ isDark: true, toggleTheme: () => {} });
+const useTheme = () => useContext(ThemeCtx);
+
+// Module-level mutable — lets helper fns (clr etc.) read current theme without prop drilling
+let THEME = { ...DARK };
 
 // ── LIVE QUOTES HOOK ─────────────────────────────────────────────────────────
 // Yahoo Finance query2 — funcționează direct din browser fără CORS issues
@@ -182,6 +196,43 @@ function MetricRow({ label, value, color }) {
   );
 }
 
+function ThemeToggle() {
+  const { isDark, toggleTheme } = useTheme();
+  return (
+    <button
+      onClick={toggleTheme}
+      title={isDark ? "Mod luminos" : "Mod întunecat"}
+      style={{
+        background: "transparent",
+        border: `1px solid ${THEME.border}`,
+        borderRadius: 6,
+        width: 32, height: 32,
+        cursor: "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        color: THEME.dim,
+        transition: "border-color 0.2s, color 0.2s",
+        flexShrink: 0,
+      }}
+    >
+      {isDark ? (
+        // Sun icon
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="5"/>
+          <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+          <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        </svg>
+      ) : (
+        // Moon icon
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      )}
+    </button>
+  );
+}
+
 function TopBar({ onRefresh, liveStatus, lastUpdate }) {
   const [time, setTime] = useState(new Date());
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 30000); return () => clearInterval(t); }, []);
@@ -204,17 +255,23 @@ function TopBar({ onRefresh, liveStatus, lastUpdate }) {
           <div style={{ fontSize: 9, color: statusDot.color, fontFamily: "monospace", letterSpacing: 1 }}>{statusDot.label}</div>
         </div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <div style={{ fontSize: 10, color: THEME.dim, textAlign: "right" }}>
           <div style={{ color: THEME.text, fontFamily: "monospace" }}>{time.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" })}</div>
         </div>
+        <ThemeToggle />
         <button onClick={onRefresh}
           style={{ background: "transparent", border: `1px solid ${THEME.gold}`, color: THEME.gold, borderRadius: 6, width: 32, height: 32, cursor: "pointer", fontSize: 14,
             opacity: liveStatus === "loading" ? 0.5 : 1 }}>
           {liveStatus === "loading" ? "⟳" : "↻"}
         </button>
       </div>
-      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
+      <style>{`
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  * { transition: background-color 0.22s ease, border-color 0.22s ease, color 0.18s ease; }
+  svg *, path, rect, circle, line, text { transition: none !important; }
+  input, select, button { transition: background-color 0.22s ease, border-color 0.22s ease, color 0.18s ease !important; }
+`}</style>
     </div>
   );
 }
@@ -1136,7 +1193,7 @@ function PriceHistoryChart({ closes, avgCost }) {
         {yTickVals.map((v, i) => (
           <g key={i}>
             <line x1={PAD.l} y1={toY(v)} x2={W - PAD.r} y2={toY(v)} stroke="#21262D" strokeWidth="0.5" />
-            <text x={PAD.l - 2} y={toY(v) + 3} fill="#8B949E" fontSize="7" fontFamily="monospace" textAnchor="end">${v.toFixed(0)}</text>
+            <text x={PAD.l - 2} y={toY(v) + 3} fill={THEME.dim} fontSize="7" fontFamily="monospace" textAnchor="end">${v.toFixed(0)}</text>
           </g>
         ))}
         {/* Fill + Close */}
@@ -1155,16 +1212,16 @@ function PriceHistoryChart({ closes, avgCost }) {
         {hoverIdx !== null && hx !== null && hy !== null && (
           <>
             <line x1={hx} y1={PAD.t} x2={hx} y2={PAD.t + ch} stroke="#8B949E" strokeWidth="0.7" strokeDasharray="2,2" />
-            <circle cx={hx} cy={hy} r={3.5} fill="#4A9EFF" stroke="#0D1117" strokeWidth="1.5" />
-            <rect x={Math.min(hx - 26, W - 62)} y={PAD.t} width={56} height={18} rx={3} fill="#161B22" stroke="#21262D" strokeWidth="0.8" />
-            <text x={Math.min(hx - 26, W - 62) + 28} y={PAD.t + 12} fill="#C9D1D9" fontSize="9" fontFamily="monospace" textAnchor="middle">${hprice?.toFixed(2)}</text>
+            <circle cx={hx} cy={hy} r={3.5} fill="#4A9EFF" stroke={THEME.bg} strokeWidth="1.5" />
+            <rect x={Math.min(hx - 26, W - 62)} y={PAD.t} width={56} height={18} rx={3} fill={THEME.surface} stroke="#21262D" strokeWidth="0.8" />
+            <text x={Math.min(hx - 26, W - 62) + 28} y={PAD.t + 12} fill={THEME.text} fontSize="9" fontFamily="monospace" textAnchor="middle">${hprice?.toFixed(2)}</text>
           </>
         )}
         {/* X axis */}
         <line x1={PAD.l} y1={PAD.t + ch} x2={W - PAD.r} y2={PAD.t + ch} stroke="#21262D" strokeWidth="0.8" />
         {[0, 63, 126, 189, 251].filter(i => i < n).map((i, k) => {
           const lbls = ["1Y", "9M", "6M", "3M", "Acum"];
-          return <text key={k} x={toX(i)} y={H - 5} fill="#8B949E" fontSize="7" fontFamily="monospace" textAnchor="middle">{lbls[k]}</text>;
+          return <text key={k} x={toX(i)} y={H - 5} fill={THEME.dim} fontSize="7" fontFamily="monospace" textAnchor="middle">{lbls[k]}</text>;
         })}
       </svg>
       {/* Legend */}
@@ -1222,7 +1279,7 @@ function FCFDividendChart({ stock }) {
         {yTicks.map((v, i) => (
           <g key={i}>
             <line x1={PAD.l} y1={toY(v)} x2={W - PAD.r} y2={toY(v)} stroke="#21262D" strokeWidth="0.5" />
-            <text x={PAD.l - 2} y={toY(v) + 3} fill="#8B949E" fontSize="7" fontFamily="monospace" textAnchor="end">${v.toFixed(1)}</text>
+            <text x={PAD.l - 2} y={toY(v) + 3} fill={THEME.dim} fontSize="7" fontFamily="monospace" textAnchor="end">${v.toFixed(1)}</text>
           </g>
         ))}
         {/* FCF bars */}
@@ -1243,13 +1300,13 @@ function FCFDividendChart({ stock }) {
         {/* Dots */}
         {data.map((d, i) => (
           <g key={`dot${i}`}>
-            <circle cx={toX(i)} cy={toY(d.fcf)} r={3.5} fill="#2ECC71" stroke="#0D1117" strokeWidth="1.2" />
-            <circle cx={toX(i)} cy={toY(d.div)} r={3.5} fill="#E8C468" stroke="#0D1117" strokeWidth="1.2" />
+            <circle cx={toX(i)} cy={toY(d.fcf)} r={3.5} fill="#2ECC71" stroke={THEME.bg} strokeWidth="1.2" />
+            <circle cx={toX(i)} cy={toY(d.div)} r={3.5} fill="#E8C468" stroke={THEME.bg} strokeWidth="1.2" />
           </g>
         ))}
         {/* X labels */}
         {data.map((d, i) => (
-          <text key={`xl${i}`} x={toX(i)} y={H - 5} fill="#8B949E" fontSize="8" fontFamily="monospace" textAnchor="middle">{d.yr}</text>
+          <text key={`xl${i}`} x={toX(i)} y={H - 5} fill={THEME.dim} fontSize="8" fontFamily="monospace" textAnchor="middle">{d.yr}</text>
         ))}
         {/* X axis */}
         <line x1={PAD.l} y1={PAD.t + ch} x2={W - PAD.r} y2={PAD.t + ch} stroke="#21262D" strokeWidth="0.8" />
@@ -1320,7 +1377,7 @@ function RevenueChart({ stock }) {
         {yTicks.map((v, i) => (
           <g key={i}>
             <line x1={PAD.l} y1={toY(v)} x2={W - PAD.r} y2={toY(v)} stroke="#21262D" strokeWidth="0.5" />
-            <text x={PAD.l - 2} y={toY(v) + 3} fill="#8B949E" fontSize="6.5" fontFamily="monospace" textAnchor="end">${v.toFixed(1)}B</text>
+            <text x={PAD.l - 2} y={toY(v) + 3} fill={THEME.dim} fontSize="6.5" fontFamily="monospace" textAnchor="end">${v.toFixed(1)}B</text>
           </g>
         ))}
         {/* Bars */}
@@ -1343,13 +1400,13 @@ function RevenueChart({ stock }) {
           const growing = d.rev >= prev;
           return (
             <g key={`rv${i}`}>
-              <circle cx={toX(i)} cy={toY(d.rev)} r={3.5} fill={THEME.gold} stroke="#0D1117" strokeWidth="1.2" />
-              <text x={toX(i)} y={toY(d.rev) - 5} fill="#8B949E" fontSize="7" fontFamily="monospace" textAnchor="middle">${d.rev.toFixed(1)}B</text>
+              <circle cx={toX(i)} cy={toY(d.rev)} r={3.5} fill={THEME.gold} stroke={THEME.bg} strokeWidth="1.2" />
+              <text x={toX(i)} y={toY(d.rev) - 5} fill={THEME.dim} fontSize="7" fontFamily="monospace" textAnchor="middle">${d.rev.toFixed(1)}B</text>
             </g>
           );
         })}
         {data.map((d, i) => (
-          <text key={`xl${i}`} x={toX(i)} y={H - 5} fill="#8B949E" fontSize="8" fontFamily="monospace" textAnchor="middle">{d.yr}</text>
+          <text key={`xl${i}`} x={toX(i)} y={H - 5} fill={THEME.dim} fontSize="8" fontFamily="monospace" textAnchor="middle">{d.yr}</text>
         ))}
         <line x1={PAD.l} y1={PAD.t + ch} x2={W - PAD.r} y2={PAD.t + ch} stroke="#21262D" strokeWidth="0.8" />
       </svg>
@@ -1403,7 +1460,7 @@ function BuybackChart({ stock }) {
         {yTicks.map((v, i) => (
           <g key={i}>
             <line x1={PAD.l} y1={toY(v)} x2={W - PAD.r} y2={toY(v)} stroke="#21262D" strokeWidth="0.5" />
-            <text x={PAD.l - 2} y={toY(v) + 3} fill="#8B949E" fontSize="6.5" fontFamily="monospace" textAnchor="end">{v.toFixed(0)}M</text>
+            <text x={PAD.l - 2} y={toY(v) + 3} fill={THEME.dim} fontSize="6.5" fontFamily="monospace" textAnchor="end">{v.toFixed(0)}M</text>
           </g>
         ))}
         {/* Bars cu culoare: verde dacă scade (buyback), roșu dacă crește (dilution) */}
@@ -1427,13 +1484,13 @@ function BuybackChart({ stock }) {
           const buyback = d.shares <= prev;
           return (
             <g key={`bb${i}`}>
-              <circle cx={toX(i)} cy={toY(d.shares)} r={3.5} fill={buyback ? THEME.green : THEME.red} stroke="#0D1117" strokeWidth="1.2" />
-              <text x={toX(i)} y={toY(d.shares) - 5} fill="#8B949E" fontSize="6.5" fontFamily="monospace" textAnchor="middle">{d.shares.toFixed(0)}M</text>
+              <circle cx={toX(i)} cy={toY(d.shares)} r={3.5} fill={buyback ? THEME.green : THEME.red} stroke={THEME.bg} strokeWidth="1.2" />
+              <text x={toX(i)} y={toY(d.shares) - 5} fill={THEME.dim} fontSize="6.5" fontFamily="monospace" textAnchor="middle">{d.shares.toFixed(0)}M</text>
             </g>
           );
         })}
         {data.map((d, i) => (
-          <text key={`xl${i}`} x={toX(i)} y={H - 5} fill="#8B949E" fontSize="8" fontFamily="monospace" textAnchor="middle">{d.yr}</text>
+          <text key={`xl${i}`} x={toX(i)} y={H - 5} fill={THEME.dim} fontSize="8" fontFamily="monospace" textAnchor="middle">{d.yr}</text>
         ))}
         <line x1={PAD.l} y1={PAD.t + ch} x2={W - PAD.r} y2={PAD.t + ch} stroke="#21262D" strokeWidth="0.8" />
       </svg>
@@ -1583,7 +1640,7 @@ function TechnicalChart({ closes, avgCost }) {
       ))}
       {/* Y tick labels */}
       {yTicks.map((t, i) => (
-        <text key={i} x={PAD.l + 2} y={t.y - 2} fill="#8B949E" fontSize="7" fontFamily="monospace">${t.v.toFixed(0)}</text>
+        <text key={i} x={PAD.l + 2} y={t.y - 2} fill={THEME.dim} fontSize="7" fontFamily="monospace">${t.v.toFixed(0)}</text>
       ))}
       {/* Fill */}
       <path d={fillPath} fill={`url(#pg_${closes[0]?.toFixed(0)})`} />
@@ -1612,7 +1669,7 @@ function TechnicalChart({ closes, avgCost }) {
       {/* X labels */}
       {[0, 63, 126, 189, 251].filter(i => i < n).map((i, k) => {
         const labels = ["1Y", "9M", "6M", "3M", "Now"];
-        return <text key={k} x={toX(i)} y={H - 4} fill="#8B949E" fontSize="7" fontFamily="monospace" textAnchor="middle">{labels[k]}</text>;
+        return <text key={k} x={toX(i)} y={H - 4} fill={THEME.dim} fontSize="7" fontFamily="monospace" textAnchor="middle">{labels[k]}</text>;
       })}
     </svg>
   );
@@ -1829,7 +1886,7 @@ function DeepDiveTab({ portfolio, totals }) {
       <select
         value={selected}
         onChange={e => { setSelected(e.target.value); setDeepSubTab("tehnic"); }}
-        style={{ background: THEME.surface, border: `1px solid ${THEME.border}`, color: THEME.text, borderRadius: 6, padding: "10px 12px", fontSize: 13, fontFamily: "monospace", width: "100%" }}
+        style={{ background: THEME.inputBg, border: `1px solid ${THEME.border}`, color: THEME.text, borderRadius: 6, padding: "10px 12px", fontSize: 13, fontFamily: "monospace", width: "100%" }}
       >
         {[...portfolio].sort((a, b) => a.symbol.localeCompare(b.symbol)).map(p => (
           <option key={p.symbol} value={p.symbol}>{p.symbol} — {p.name}</option>
@@ -2396,7 +2453,7 @@ function AlerteTab({ portfolio, alerts, setAlerts }) {
                   value={a.buy || ""}
                   onChange={e => setAlerts(prev => ({ ...prev, [s.symbol]: { ...prev[s.symbol], buy: parseFloat(e.target.value) || 0 } }))}
                   placeholder="0.00"
-                  style={{ width: "100%", background: THEME.bg, border: `1px solid ${THEME.border}`, color: THEME.text, borderRadius: 5, padding: "6px 8px", fontSize: 12, fontFamily: "monospace", boxSizing: "border-box" }}
+                  style={{ width: "100%", background: THEME.inputBg, border: `1px solid ${THEME.border}`, color: THEME.text, borderRadius: 5, padding: "6px 8px", fontSize: 12, fontFamily: "monospace", boxSizing: "border-box" }}
                   min={0} step={0.5}
                 />
               </div>
@@ -2407,7 +2464,7 @@ function AlerteTab({ portfolio, alerts, setAlerts }) {
                   value={a.sell || ""}
                   onChange={e => setAlerts(prev => ({ ...prev, [s.symbol]: { ...prev[s.symbol], sell: parseFloat(e.target.value) || 0 } }))}
                   placeholder="0.00"
-                  style={{ width: "100%", background: THEME.bg, border: `1px solid ${THEME.border}`, color: THEME.text, borderRadius: 5, padding: "6px 8px", fontSize: 12, fontFamily: "monospace", boxSizing: "border-box" }}
+                  style={{ width: "100%", background: THEME.inputBg, border: `1px solid ${THEME.border}`, color: THEME.text, borderRadius: 5, padding: "6px 8px", fontSize: 12, fontFamily: "monospace", boxSizing: "border-box" }}
                   min={0} step={0.5}
                 />
               </div>
@@ -2422,16 +2479,21 @@ function AlerteTab({ portfolio, alerts, setAlerts }) {
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState("matrice");
+  const [isDark, setIsDark] = useState(true);
   const [alerts, setAlerts] = useState(() => {
     const a = {};
     PORTFOLIO_DATA.forEach(s => { a[s.symbol] = { buy: 0, sell: 0 }; });
     return a;
   });
 
+  // Keep module-level THEME in sync so helper fns (clr, etc.) always have current colors
+  THEME = isDark ? DARK : LIGHT;
+
+  const toggleTheme = useCallback(() => setIsDark(d => !d), []);
+
   const symbols = PORTFOLIO_DATA.map(s => s.symbol);
   const { quotes, status, lastUpdate, refresh } = useLiveQuotes(symbols);
 
-  // Re-render key so child components re-calc when quotes arrive
   const portfolio = calcPortfolio(quotes);
 
   const totals = {
@@ -2444,43 +2506,49 @@ export default function App() {
   totals.dailyChgUSD = totals.value - totals.prevValue;
   totals.dailyChgPct = (totals.dailyChgUSD / totals.prevValue) * 100;
 
-  // Count triggered alerts for badge
   const alertCount = portfolio.filter(s => {
     const a = alerts[s.symbol] || {};
     return (a.buy > 0 && s.price <= a.buy) || (a.sell > 0 && s.price >= a.sell);
   }).length;
 
-  const liveCount  = portfolio.filter(s => s.isLive).length;
+  const liveCount = portfolio.filter(s => s.isLive).length;
 
   return (
-    <div style={{ background: THEME.bg, minHeight: "100vh", color: THEME.text, fontFamily: "'Segoe UI', system-ui, sans-serif", maxWidth: 480, margin: "0 auto", paddingBottom: 72 }}>
-      <TopBar onRefresh={refresh} liveStatus={status} lastUpdate={lastUpdate} />
+    <ThemeCtx.Provider value={{ isDark, toggleTheme }}>
+      <div style={{
+        background: THEME.bg, minHeight: "100vh", color: THEME.text,
+        fontFamily: "'Segoe UI', system-ui, sans-serif", maxWidth: 480,
+        margin: "0 auto", paddingBottom: 72,
+        transition: "background 0.25s, color 0.25s",
+      }}>
+        <TopBar onRefresh={refresh} liveStatus={status} lastUpdate={lastUpdate} />
 
-      {/* Live coverage banner */}
-      {status === "live" && liveCount < symbols.length && (
-        <div style={{ background: `${THEME.gold}15`, borderBottom: `1px solid ${THEME.gold}44`, padding: "6px 14px", fontSize: 10, color: THEME.gold, fontFamily: "monospace" }}>
-          ⚡ {liveCount}/{symbols.length} tickere actualizate live · restul din cache
-        </div>
-      )}
-      {status === "error" && (
-        <div style={{ background: `${THEME.red}15`, borderBottom: `1px solid ${THEME.red}44`, padding: "6px 14px", fontSize: 10, color: THEME.red, fontFamily: "monospace" }}>
-          ⚠ Date live indisponibile (CORS / rată depășită) · se afișează date demo
-        </div>
-      )}
+        {/* Live coverage banner */}
+        {status === "live" && liveCount < symbols.length && (
+          <div style={{ background: `${THEME.gold}18`, borderBottom: `1px solid ${THEME.gold}44`, padding: "6px 14px", fontSize: 10, color: THEME.gold, fontFamily: "monospace" }}>
+            ⚡ {liveCount}/{symbols.length} tickere actualizate live · restul din cache
+          </div>
+        )}
+        {status === "error" && (
+          <div style={{ background: `${THEME.red}18`, borderBottom: `1px solid ${THEME.red}44`, padding: "6px 14px", fontSize: 10, color: THEME.red, fontFamily: "monospace" }}>
+            ⚠ Date live indisponibile (CORS / rată depășită) · se afișează date demo
+          </div>
+        )}
 
-      <SummaryMetrics totals={totals} />
+        <SummaryMetrics totals={totals} />
 
-      <div style={{ paddingTop: 8 }} />
+        <div style={{ paddingTop: 8 }} />
 
-      {tab === "matrice"   && <MatriceTab   portfolio={portfolio} totals={totals} />}
-      {tab === "diagnoza"  && <DiagTab      portfolio={portfolio} totals={totals} />}
-      {tab === "fluxuri"   && <FluxTab      portfolio={portfolio} />}
-      {tab === "rebal"     && <RebalTab     portfolio={portfolio} totals={totals} />}
-      {tab === "watchlist" && <WatchlistTab portfolio={portfolio} totals={totals} />}
-      {tab === "deepdive"  && <DeepDiveTab  portfolio={portfolio} totals={totals} />}
-      {tab === "alerte"    && <AlerteTab    portfolio={portfolio} alerts={alerts} setAlerts={setAlerts} />}
+        {tab === "matrice"   && <MatriceTab   portfolio={portfolio} totals={totals} />}
+        {tab === "diagnoza"  && <DiagTab      portfolio={portfolio} totals={totals} />}
+        {tab === "fluxuri"   && <FluxTab      portfolio={portfolio} />}
+        {tab === "rebal"     && <RebalTab     portfolio={portfolio} totals={totals} />}
+        {tab === "watchlist" && <WatchlistTab portfolio={portfolio} totals={totals} />}
+        {tab === "deepdive"  && <DeepDiveTab  portfolio={portfolio} totals={totals} />}
+        {tab === "alerte"    && <AlerteTab    portfolio={portfolio} alerts={alerts} setAlerts={setAlerts} />}
 
-      <BottomNav active={tab} onChange={setTab} alertCount={alertCount} />
-    </div>
+        <BottomNav active={tab} onChange={setTab} alertCount={alertCount} />
+      </div>
+    </ThemeCtx.Provider>
   );
 }
