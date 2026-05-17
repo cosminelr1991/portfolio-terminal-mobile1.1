@@ -38,34 +38,17 @@ const useTheme = () => useContext(ThemeCtx);
 let THEME = { ...DARK };
 
 // ── LIVE QUOTES HOOK ─────────────────────────────────────────────────────────
-// Yahoo Finance query2 — funcționează direct din browser fără CORS issues
+// Live quotes are fetched through the Vercel API proxy to avoid browser CORS limits.
 async function fetchYahooQuotes(symbols) {
   const joined = symbols.join(",");
-  const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${joined}&fields=regularMarketPrice,regularMarketPreviousClose,trailingPE,dividendYield,marketCap,beta,trailingAnnualDividendRate,payoutRatio,profitMargins,returnOnEquity,currentRatio,debtToEquity`;
+  const url = `/api/quotes?symbols=${encodeURIComponent(joined)}`;
   try {
     const res = await fetch(url, { headers: { Accept: "application/json" } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    const results = {};
-    (data?.quoteResponse?.result || []).forEach(q => {
-      results[q.symbol] = {
-        price:        q.regularMarketPrice             ?? null,
-        prevPrice:    q.regularMarketPreviousClose      ?? null,
-        pe:           q.trailingPE                     ?? null,
-        divYield:     q.dividendYield != null ? q.dividendYield * 100 : null,
-        mktCap:       q.marketCap     != null ? Math.round(q.marketCap / 1e9) : null,
-        beta:         q.beta                           ?? null,
-        divRate:      q.trailingAnnualDividendRate      ?? null,
-        payout:       q.payoutRatio   != null ? q.payoutRatio * 100 : null,
-        profitMargin: q.profitMargins                  ?? null,
-        roe:          q.returnOnEquity                 ?? null,
-        currentRatio: q.currentRatio                  ?? null,
-        debtEq:       q.debtToEquity  != null ? q.debtToEquity / 100 : null,
-      };
-    });
-    return Object.keys(results).length > 0 ? results : null;
+    return data?.quotes && Object.keys(data.quotes).length > 0 ? data.quotes : null;
   } catch (e) {
-    console.warn("Yahoo Finance fetch failed:", e.message);
+    console.warn("Live quote fetch failed:", e.message);
     return null;
   }
 }
