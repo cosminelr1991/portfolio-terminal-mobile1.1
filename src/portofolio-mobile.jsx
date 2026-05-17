@@ -637,11 +637,231 @@ function WatchlistTab({ portfolio, totals }) {
   );
 }
 
-// ── TAB 6: DEEP DIVE ──────────────────────────────────────────────────────────
+// ── TAB 6: DEEP DIVE (FULL) ───────────────────────────────────────────────────
+const AV_API_KEY = "X5RO0IYNYQ3CBFSY";
+
+function MiniSparkline({ data, color, height = 48 }) {
+  if (!data || data.length < 2) return null;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+  const w = 300, h = height;
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * w;
+    const y = h - ((v - min) / range) * (h - 4) - 2;
+    return `${x},${y}`;
+  }).join(" ");
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height }} preserveAspectRatio="none">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function TechnicalChart({ closes, avgCost }) {
+  if (!closes || closes.length < 26) return null;
+  const n = closes.length;
+  const w = 340, h = 120;
+
+  // SMA20
+  const sma20 = closes.map((_, i) => {
+    if (i < 19) return null;
+    return closes.slice(i - 19, i + 1).reduce((a, b) => a + b, 0) / 20;
+  });
+
+  const allVals = [...closes, ...sma20.filter(Boolean)];
+  const minV = Math.min(...allVals) * 0.995;
+  const maxV = Math.max(...allVals) * 1.005;
+  const range = maxV - minV || 1;
+
+  const toY = v => h - ((v - minV) / range) * h;
+  const toX = i => (i / (n - 1)) * w;
+
+  const closePath = closes.map((v, i) => `${i === 0 ? "M" : "L"}${toX(i)},${toY(v)}`).join(" ");
+  const fillPath = closePath + ` L${toX(n-1)},${h} L0,${h} Z`;
+  const smaPath = sma20.map((v, i) => v !== null ? `${sma20.slice(0, i).every(x => x === null) ? "M" : "L"}${toX(i)},${toY(v)}` : "").filter(Boolean).join(" ");
+
+  const avgY = avgCost ? toY(avgCost) : null;
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: 120 }} preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#4A9EFF" stopOpacity="0.25" />
+          <stop offset="100%" stopColor="#4A9EFF" stopOpacity="0.01" />
+        </linearGradient>
+      </defs>
+      <path d={fillPath} fill="url(#priceGrad)" />
+      <path d={closePath} fill="none" stroke="#4A9EFF" strokeWidth="2" strokeLinejoin="round" />
+      <path d={smaPath} fill="none" stroke="#E8C468" strokeWidth="1.4" strokeDasharray="4,3" strokeLinejoin="round" />
+      {avgY !== null && (
+        <>
+          <line x1={0} y1={avgY} x2={w} y2={avgY} stroke="#E8C468" strokeWidth="1" strokeDasharray="5,4" opacity="0.8" />
+          <text x={4} y={avgY - 3} fill="#E8C468" fontSize="8" fontFamily="monospace">Cost: ${avgCost?.toFixed(2)}</text>
+        </>
+      )}
+    </svg>
+  );
+}
+
+function RSIChart({ closes }) {
+  if (!closes || closes.length < 15) return null;
+  const w = 340, h = 50;
+  const rsiVals = [];
+  for (let i = 14; i < closes.length; i++) {
+    const slice = closes.slice(i - 14, i + 1);
+    const gains = [], losses = [];
+    for (let j = 1; j < slice.length; j++) {
+      const d = slice[j] - slice[j - 1];
+      gains.push(d > 0 ? d : 0);
+      losses.push(d < 0 ? -d : 0);
+    }
+    const ag = gains.reduce((a, b) => a + b, 0) / 14;
+    const al = losses.reduce((a, b) => a + b, 0) / 14;
+    rsiVals.push(al === 0 ? 100 : 100 - 100 / (1 + ag / al));
+  }
+  const toX = i => (i / (rsiVals.length - 1)) * w;
+  const toY = v => h - (v / 100) * h;
+  const path = rsiVals.map((v, i) => `${i === 0 ? "M" : "L"}${toX(i)},${toY(v)}`).join(" ");
+  const last = rsiVals[rsiVals.length - 1];
+  const rsiColor = last > 70 ? "#E74C3C" : last < 30 ? "#2ECC71" : "#E8C468";
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: 50 }} preserveAspectRatio="none">
+      <line x1={0} y1={toY(70)} x2={w} y2={toY(70)} stroke="#E74C3C" strokeWidth="0.8" strokeDasharray="3,3" opacity="0.6" />
+      <line x1={0} y1={toY(30)} x2={w} y2={toY(30)} stroke="#2ECC71" strokeWidth="0.8" strokeDasharray="3,3" opacity="0.6" />
+      <path d={path} fill="none" stroke={rsiColor} strokeWidth="1.6" strokeLinejoin="round" />
+      <text x={w - 4} y={10} fill={rsiColor} fontSize="9" fontFamily="monospace" textAnchor="end">{last.toFixed(1)}</text>
+    </svg>
+  );
+}
+
+function MACDChart({ closes }) {
+  if (!closes || closes.length < 30) return null;
+  const w = 340, h = 50;
+
+  const ema = (data, period) => {
+    const k = 2 / (period + 1);
+    let e = data[0];
+    return data.map(v => { e = v * k + e * (1 - k); return e; });
+  };
+
+  const ema12 = ema(closes, 12);
+  const ema26 = ema(closes, 26);
+  const macdLine = ema12.map((v, i) => v - ema26[i]);
+  const signal = ema(macdLine.slice(25), 9);
+  const hist = macdLine.slice(34).map((v, i) => v - signal[i]);
+
+  const allV = [...hist];
+  const minV = Math.min(...allV);
+  const maxV = Math.max(...allV);
+  const range = maxV - minV || 1;
+  const toY = v => h / 2 - (v / (range / 2)) * (h / 2 - 2);
+  const toX = i => (i / (hist.length - 1)) * w;
+  const barW = w / hist.length;
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: 50 }} preserveAspectRatio="none">
+      <line x1={0} y1={h / 2} x2={w} y2={h / 2} stroke="#21262D" strokeWidth="0.8" />
+      {hist.map((v, i) => {
+        const y0 = h / 2;
+        const y1 = toY(v);
+        return (
+          <rect key={i} x={toX(i)} y={Math.min(y0, y1)} width={barW - 0.5} height={Math.abs(y0 - y1) || 0.5}
+            fill={v >= 0 ? "#2ECC71" : "#E74C3C"} opacity="0.75" />
+        );
+      })}
+    </svg>
+  );
+}
+
+function VaRDistribution({ returns }) {
+  if (!returns || returns.length < 20) return null;
+  const var95 = [...returns].sort((a, b) => a - b)[Math.floor(returns.length * 0.05)];
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const std = Math.sqrt(returns.map(r => (r - mean) ** 2).reduce((a, b) => a + b, 0) / returns.length);
+  const winRate = returns.filter(r => r > 0).length / returns.length * 100;
+  const sharpe = (mean * 252) / (std * Math.sqrt(252));
+  const annVol = std * Math.sqrt(252);
+  const maxDD = Math.min(...returns);
+
+  const bins = 24;
+  const minR = Math.min(...returns), maxR = Math.max(...returns);
+  const binW = (maxR - minR) / bins;
+  const counts = Array(bins).fill(0);
+  returns.forEach(r => {
+    const idx = Math.min(bins - 1, Math.floor((r - minR) / binW));
+    counts[idx]++;
+  });
+  const maxCount = Math.max(...counts);
+  const chartW = 320, chartH = 60;
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{ width: "100%", height: 60 }} preserveAspectRatio="none">
+        {counts.map((c, i) => {
+          const bx = (i / bins) * chartW;
+          const bw = (1 / bins) * chartW - 0.5;
+          const bh = (c / maxCount) * (chartH - 4);
+          const centerVal = minR + (i + 0.5) * binW;
+          return <rect key={i} x={bx} y={chartH - bh} width={bw} height={bh} fill={centerVal < 0 ? "#E74C3C" : "#4A9EFF"} opacity="0.7" />;
+        })}
+        {/* VaR 95% line */}
+        {(() => {
+          const varX = ((var95 - minR) / (maxR - minR)) * chartW;
+          return <line x1={varX} y1={0} x2={varX} y2={chartH} stroke="#E8C468" strokeWidth="1.5" strokeDasharray="3,2" />;
+        })()}
+      </svg>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 8 }}>
+        {[
+          { l: "VaR 95% Zilnic", v: `${var95.toFixed(2)}%`, good: var95 > -2 },
+          { l: "Sharpe Ratio (1Y)", v: sharpe.toFixed(2), good: sharpe > 1 },
+          { l: "Win Rate", v: `${winRate.toFixed(1)}%`, good: winRate > 52 },
+          { l: "Volatilitate Anuală", v: `${annVol.toFixed(1)}%`, good: annVol < 25 },
+          { l: "Cel mai rău Drawdown", v: `${maxDD.toFixed(2)}%`, good: maxDD > -5 },
+          { l: "Medie Zilnică", v: `${mean.toFixed(3)}%`, good: mean > 0 },
+        ].map(x => (
+          <div key={x.l} style={{ background: THEME.bg, borderRadius: 5, padding: "6px 8px" }}>
+            <div style={{ fontSize: 8, color: THEME.dim }}>{x.l}</div>
+            <div style={{ fontFamily: "monospace", fontSize: 11, color: x.good ? THEME.green : THEME.red }}>{x.v}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DeepDiveTab({ portfolio, totals }) {
   const [selected, setSelected] = useState(portfolio[0]?.symbol || "");
+  const [chartData, setChartData] = useState({});
+  const [loadingChart, setLoadingChart] = useState(false);
+  const [deepSubTab, setDeepSubTab] = useState("tehnic");
+
   const s = portfolio.find(p => p.symbol === selected) || portfolio[0];
   if (!s) return null;
+
+  useEffect(() => {
+    if (chartData[selected]) return;
+    setLoadingChart(true);
+    fetch(`https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${selected}&outputsize=full&apikey=${AV_API_KEY}`)
+      .then(r => r.json())
+      .then(data => {
+        const ts = data["Time Series (Daily)"];
+        if (!ts) { setLoadingChart(false); return; }
+        const sorted = Object.entries(ts)
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .slice(-252);
+        const closes = sorted.map(([, v]) => parseFloat(v["4. close"]));
+        const returns = closes.slice(1).map((v, i) => ((v - closes[i]) / closes[i]) * 100);
+        setChartData(prev => ({ ...prev, [selected]: { closes, returns } }));
+        setLoadingChart(false);
+      })
+      .catch(() => setLoadingChart(false));
+  }, [selected]);
+
+  const cd = chartData[selected];
+  const closes = cd?.closes || [];
+  const returns = cd?.returns || [];
 
   const scorecard = [
     { label: "Net Profit Margin", value: `${(s.profitMargin * 100).toFixed(1)}%`, good: s.profitMargin > 0.10, note: "Profitabilitate netă" },
@@ -657,19 +877,31 @@ function DeepDiveTab({ portfolio, totals }) {
   const radarItems = [
     { label: "Profitabilitate", score: Math.min(100, s.profitMargin * 400) },
     { label: "ROE", score: Math.min(100, s.roe * 200) },
-    { label: "Stabilitate", score: Math.max(0, 100 - (s.beta - 0.5) * 66) },
-    { label: "Evaluare", score: s.pe > 0 ? Math.max(0, 100 - (s.pe - 10) * 2.5) : 50 },
-    { label: "Dividend", score: Math.min(100, s.divYield * 12) },
+    { label: "Stabilitate (β)", score: Math.max(0, 100 - (s.beta - 0.5) * 66) },
+    { label: "Evaluare (P/E)", score: s.pe > 0 ? Math.max(0, 100 - (s.pe - 10) * 2.5) : 50 },
+    { label: "Randament Div.", score: Math.min(100, s.divYield * 12) },
     { label: "Lichiditate", score: Math.min(100, s.currentRatio * 40) },
   ];
 
+  const low52 = closes.length > 0 ? Math.min(...closes) : s.price * 0.78;
+  const high52 = closes.length > 0 ? Math.max(...closes) : s.price * 1.22;
+  const posInRange = ((s.price - low52) / (high52 - low52)) * 100;
+
+  const subTabs = [
+    { id: "tehnic", label: "Tehnic" },
+    { id: "financiar", label: "Financiar" },
+    { id: "risc", label: "Risc" },
+    { id: "pozitie", label: "Poziție" },
+  ];
+
   return (
-    <div style={{ padding: "16px 12px", display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ padding: "16px 12px", display: "flex", flexDirection: "column", gap: 14 }}>
       <SectionHeader>ANALIZĂ DETALIATĂ PER ACTIV</SectionHeader>
 
+      {/* Selector ticker */}
       <select
         value={selected}
-        onChange={e => setSelected(e.target.value)}
+        onChange={e => { setSelected(e.target.value); setDeepSubTab("tehnic"); }}
         style={{ background: THEME.surface, border: `1px solid ${THEME.border}`, color: THEME.text, borderRadius: 6, padding: "10px 12px", fontSize: 13, fontFamily: "monospace", width: "100%" }}
       >
         {[...portfolio].sort((a, b) => a.symbol.localeCompare(b.symbol)).map(p => (
@@ -677,94 +909,453 @@ function DeepDiveTab({ portfolio, totals }) {
         ))}
       </select>
 
+      {/* Header companie */}
       <Card accent={THEME.gold}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <div style={{ fontFamily: "Georgia, serif", fontSize: 18, color: THEME.text }}>{s.name}</div>
-            <div style={{ fontFamily: "monospace", fontSize: 12, color: THEME.gold, marginTop: 2 }}>{s.symbol} · {s.sector}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: "Georgia, serif", fontSize: 16, color: THEME.text, lineHeight: 1.3 }}>{s.name}</div>
+            <div style={{ fontFamily: "monospace", fontSize: 11, color: THEME.gold, marginTop: 2 }}>{s.symbol} · {s.sector}</div>
           </div>
-          <div style={{ textAlign: "right" }}>
+          <div style={{ textAlign: "right", marginLeft: 10 }}>
             <div style={{ fontFamily: "monospace", fontSize: 20, color: clr(s.dailyChg) }}>${fmt(s.price)}</div>
             <div style={{ fontFamily: "monospace", fontSize: 12, color: clr(s.dailyChg) }}>{sign(s.dailyChg)}{fmt(s.dailyChg, 2)}%</div>
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginTop: 12 }}>
+        {/* 5 key metrics row */}
+        <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
           {[
-            { l: "Valoare", v: fmtUSD(s.value) },
-            { l: "Profit", v: `${sign(s.profit)}${fmtUSD(s.profit)}`, c: clr(s.profit) },
-            { l: "Return", v: `${sign(s.profitPct)}${fmt(s.profitPct, 1)}%`, c: clr(s.profitPct) },
-            { l: "Acțiuni", v: s.shares },
-            { l: "Cost Med.", v: `$${fmt(s.avgCost)}` },
-            { l: "Div/An", v: `$${fmt(s.annualDiv)}` },
+            { l: "P/E", v: s.pe > 0 ? s.pe.toFixed(1) : "N/A" },
+            { l: "Mkt Cap", v: `$${s.mktCap}B` },
+            { l: "Div Yield", v: `${s.divYield.toFixed(2)}%` },
+            { l: "Beta", v: s.beta.toFixed(2) },
+            { l: "Margin", v: `${(s.profitMargin*100).toFixed(1)}%` },
           ].map(x => (
-            <div key={x.l} style={{ background: THEME.bg, borderRadius: 5, padding: "6px 8px" }}>
-              <div style={{ fontSize: 8, color: THEME.dim }}>{x.l}</div>
-              <div style={{ fontFamily: "monospace", fontSize: 11, color: x.c || THEME.text }}>{x.v}</div>
+            <div key={x.l} style={{ flex: "1 0 18%", background: THEME.bg, borderRadius: 5, padding: "5px 6px", textAlign: "center" }}>
+              <div style={{ fontSize: 7, color: THEME.dim, marginBottom: 2 }}>{x.l}</div>
+              <div style={{ fontFamily: "monospace", fontSize: 11, color: THEME.text }}>{x.v}</div>
             </div>
           ))}
         </div>
+        {/* Sparkline preview */}
+        {closes.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <MiniSparkline data={closes} color={closes[closes.length-1] >= closes[0] ? THEME.green : THEME.red} height={40} />
+          </div>
+        )}
+        {loadingChart && <div style={{ fontSize: 10, color: THEME.dim, marginTop: 6, textAlign: "center" }}>⏳ Se încarcă date Alpha Vantage...</div>}
       </Card>
 
-      <section>
-        <SectionHeader>SCORECARD FINANCIAR</SectionHeader>
-        <Card>
-          {scorecard.map((item, i) => (
-            <div key={item.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: i < scorecard.length - 1 ? `1px solid ${THEME.border}` : "none" }}>
-              <div>
-                <div style={{ fontSize: 12, color: THEME.text }}>{item.label}</div>
-                <div style={{ fontSize: 9, color: THEME.dim }}>{item.note}</div>
+      {/* Sub-tab navigation */}
+      <div style={{ display: "flex", borderBottom: `1px solid ${THEME.border}`, overflowX: "auto", scrollbarWidth: "none" }}>
+        {subTabs.map(t => (
+          <button key={t.id} onClick={() => setDeepSubTab(t.id)}
+            style={{ flexShrink: 0, background: "transparent", border: "none",
+              borderBottom: deepSubTab === t.id ? `2px solid ${THEME.gold}` : "2px solid transparent",
+              color: deepSubTab === t.id ? THEME.gold : THEME.dim,
+              padding: "8px 14px", fontSize: 10, letterSpacing: 0.5, cursor: "pointer", fontFamily: "inherit" }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── SUB-TAB: TEHNIC ── */}
+      {deepSubTab === "tehnic" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+          {/* Preț + BB + SMA20 */}
+          <Card>
+            <div style={{ fontSize: 9, color: THEME.dim, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 8 }}>
+              PREȚ + SMA 20 &nbsp;<span style={{ color: THEME.gold }}>———</span>&nbsp; Cost Mediu &nbsp;<span style={{ color: THEME.blue }}>———</span>&nbsp; Close
+            </div>
+            {closes.length >= 26 ? (
+              <TechnicalChart closes={closes} avgCost={s.avgCost} />
+            ) : (
+              <div style={{ height: 80, display: "flex", alignItems: "center", justifyContent: "center", color: THEME.dim, fontSize: 11 }}>
+                {loadingChart ? "Se preiau date din Alpha Vantage..." : "Date insuficiente"}
               </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontFamily: "monospace", fontSize: 13, color: THEME.gold }}>{item.value}</div>
-                <Badge text={item.good ? "BINE" : "ATENȚIE"} color={item.good ? THEME.green : THEME.red} bg={item.good ? "rgba(46,204,113,0.12)" : "rgba(231,76,60,0.12)"} />
+            )}
+            {closes.length > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+                <span style={{ fontSize: 9, color: THEME.dim }}>52W Low: <span style={{ color: THEME.red }}>${low52.toFixed(2)}</span></span>
+                <span style={{ fontSize: 9, color: THEME.dim }}>52W High: <span style={{ color: THEME.green }}>${high52.toFixed(2)}</span></span>
+              </div>
+            )}
+          </Card>
+
+          {/* RSI */}
+          <Card>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ fontSize: 9, color: THEME.dim, textTransform: "uppercase", letterSpacing: 1.5 }}>RSI (14)</div>
+              <div style={{ display: "flex", gap: 10, fontSize: 9, color: THEME.dim }}>
+                <span style={{ color: THEME.red }}>— 70 Supracumpărat</span>
+                <span style={{ color: THEME.green }}>— 30 Supravândut</span>
               </div>
             </div>
-          ))}
-        </Card>
-      </section>
+            {closes.length >= 15 ? (
+              <RSIChart closes={closes} />
+            ) : (
+              <div style={{ height: 50, display: "flex", alignItems: "center", justifyContent: "center", color: THEME.dim, fontSize: 11 }}>
+                {loadingChart ? "..." : "Date insuficiente"}
+              </div>
+            )}
+          </Card>
 
-      <section>
-        <SectionHeader>RADAR PERFORMANȚĂ</SectionHeader>
-        <Card>
-          {radarItems.map(item => (
-            <div key={item.label} style={{ marginBottom: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                <span style={{ fontSize: 11, color: THEME.text }}>{item.label}</span>
-                <span style={{ fontFamily: "monospace", fontSize: 11, color: item.score >= 60 ? THEME.green : item.score >= 35 ? THEME.gold : THEME.red }}>{Math.round(item.score)}/100</span>
+          {/* MACD */}
+          <Card>
+            <div style={{ fontSize: 9, color: THEME.dim, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>MACD Histogramă (12/26/9)</div>
+            {closes.length >= 35 ? (
+              <MACDChart closes={closes} />
+            ) : (
+              <div style={{ height: 50, display: "flex", alignItems: "center", justifyContent: "center", color: THEME.dim, fontSize: 11 }}>
+                {loadingChart ? "..." : "Date insuficiente"}
               </div>
-              <div style={{ height: 6, background: THEME.border, borderRadius: 3 }}>
-                <div style={{ height: "100%", width: `${item.score}%`, background: item.score >= 60 ? THEME.green : item.score >= 35 ? THEME.gold : THEME.red, borderRadius: 3 }} />
-              </div>
+            )}
+            <div style={{ display: "flex", gap: 12, marginTop: 4, fontSize: 9, color: THEME.dim }}>
+              <span style={{ color: THEME.green }}>▮ Pozitiv (momentum bullish)</span>
+              <span style={{ color: THEME.red }}>▮ Negativ (momentum bearish)</span>
             </div>
-          ))}
-        </Card>
-      </section>
+          </Card>
 
-      <section>
-        <SectionHeader>COMPARAȚIE 52W HIGH / LOW</SectionHeader>
-        <Card>
-          {(() => {
-            const low52 = s.price * 0.78;
-            const high52 = s.price * 1.22;
-            const posInRange = ((s.price - low52) / (high52 - low52)) * 100;
-            return (
-              <>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span style={{ fontSize: 10, color: THEME.red }}>${fmt(low52)} 52W Low</span>
-                  <span style={{ fontFamily: "monospace", fontSize: 12, color: THEME.gold }}>${fmt(s.price)}</span>
-                  <span style={{ fontSize: 10, color: THEME.green }}>52W High ${fmt(high52)}</span>
+          {/* 52W Range */}
+          <Card>
+            <div style={{ fontSize: 9, color: THEME.dim, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 8 }}>COMPARAȚIE 52W HIGH / LOW</div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 10, color: THEME.red }}>${low52.toFixed(2)}<br /><span style={{ fontSize: 8, color: THEME.dim }}>52W Low</span></span>
+              <span style={{ fontFamily: "monospace", fontSize: 14, color: THEME.gold }}>${fmt(s.price)}</span>
+              <span style={{ fontSize: 10, color: THEME.green, textAlign: "right" }}>${high52.toFixed(2)}<br /><span style={{ fontSize: 8, color: THEME.dim }}>52W High</span></span>
+            </div>
+            <div style={{ height: 10, background: `linear-gradient(to right, ${THEME.red}33, ${THEME.gold}55, ${THEME.green}33)`, borderRadius: 5, position: "relative" }}>
+              <div style={{ position: "absolute", left: `${Math.max(0, Math.min(100, posInRange))}%`, top: -3, width: 16, height: 16, background: THEME.gold, borderRadius: "50%", transform: "translateX(-50%)", border: `2px solid ${THEME.bg}` }} />
+            </div>
+            <div style={{ textAlign: "center", marginTop: 6, fontSize: 10, color: THEME.dim }}>
+              Poziție în range: <span style={{ color: THEME.gold, fontFamily: "monospace" }}>{Math.max(0, Math.min(100, posInRange)).toFixed(1)}%</span>
+            </div>
+          </Card>
+
+          {/* Heatmap randamente zilnice */}
+          {returns.length > 50 && (
+            <Card>
+              <div style={{ fontSize: 9, color: THEME.dim, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 8 }}>CALENDAR RANDAMENTE ZILNICE</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                {returns.slice(-60).map((r, i) => {
+                  const intensity = Math.min(1, Math.abs(r) / 3);
+                  const bg = r >= 0
+                    ? `rgba(46,204,113,${0.1 + intensity * 0.7})`
+                    : `rgba(231,76,60,${0.1 + intensity * 0.7})`;
+                  return (
+                    <div key={i} title={`${r.toFixed(2)}%`} style={{ width: 10, height: 10, borderRadius: 2, background: bg, cursor: "default" }} />
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", gap: 12, marginTop: 6, fontSize: 8, color: THEME.dim }}>
+                <span>■ <span style={{ color: THEME.green }}>Pozitiv</span></span>
+                <span>■ <span style={{ color: THEME.red }}>Negativ</span></span>
+                <span style={{ marginLeft: "auto" }}>Ultimele 60 zile</span>
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* ── SUB-TAB: FINANCIAR ── */}
+      {deepSubTab === "financiar" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+          {/* Scorecard */}
+          <section>
+            <SectionHeader>SCORECARD FINANCIAR</SectionHeader>
+            <Card>
+              {scorecard.map((item, i) => (
+                <div key={item.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: i < scorecard.length - 1 ? `1px solid ${THEME.border}` : "none" }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: THEME.text }}>{item.label}</div>
+                    <div style={{ fontSize: 9, color: THEME.dim }}>{item.note}</div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 8 }}>
+                    <div style={{ fontFamily: "monospace", fontSize: 13, color: THEME.gold }}>{item.value}</div>
+                    <Badge
+                      text={item.good ? "BINE" : "ATENȚIE"}
+                      color={item.good ? THEME.green : THEME.red}
+                      bg={item.good ? "rgba(46,204,113,0.12)" : "rgba(231,76,60,0.12)"}
+                    />
+                  </div>
                 </div>
-                <div style={{ height: 8, background: THEME.border, borderRadius: 4, position: "relative" }}>
-                  <div style={{ position: "absolute", left: `${posInRange}%`, top: -3, width: 14, height: 14, background: THEME.gold, borderRadius: "50%", transform: "translateX(-50%)" }} />
+              ))}
+            </Card>
+          </section>
+
+          {/* EPS Proiecție */}
+          <section>
+            <SectionHeader>PROIECȚIE EPS</SectionHeader>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <Card accent={THEME.blue}>
+                <div style={{ fontSize: 9, color: THEME.dim, marginBottom: 4 }}>EPS ISTORIC (TTM)</div>
+                <div style={{ fontFamily: "monospace", fontSize: 22, color: THEME.text }}>${(s.pe > 0 ? s.price / s.pe : 0).toFixed(2)}</div>
+                <div style={{ fontSize: 9, color: THEME.dim, marginTop: 4 }}>trailing 12M</div>
+              </Card>
+              <Card accent={THEME.gold}>
+                <div style={{ fontSize: 9, color: THEME.dim, marginBottom: 4 }}>EPS ESTIMAT FWD</div>
+                {(() => {
+                  const trEps = s.pe > 0 ? s.price / s.pe : 0;
+                  const fwdEps = trEps * 1.08;
+                  const growth = ((fwdEps - trEps) / Math.abs(trEps || 1)) * 100;
+                  return (
+                    <>
+                      <div style={{ fontFamily: "monospace", fontSize: 22, color: clr(growth) }}>${fwdEps.toFixed(2)}</div>
+                      <div style={{ fontFamily: "monospace", fontSize: 11, color: clr(growth), marginTop: 4 }}>{sign(growth)}{growth.toFixed(1)}% est.</div>
+                    </>
+                  );
+                })()}
+              </Card>
+            </div>
+          </section>
+
+          {/* Dividend info */}
+          {s.divYield > 0 && (
+            <section>
+              <SectionHeader>DETALII DIVIDEND</SectionHeader>
+              <Card accent={THEME.gold}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  {[
+                    { l: "Yield Anual", v: `${s.divYield.toFixed(2)}%`, c: THEME.gold },
+                    { l: "Div/Acțiune/An", v: `$${(s.price * s.divYield / 100).toFixed(2)}` },
+                    { l: "Venit Anual", v: `$${fmt(s.annualDiv)}`, c: THEME.green },
+                    { l: "Payout Ratio", v: `${s.payout.toFixed(1)}%`, c: s.payout > 80 ? THEME.red : THEME.text },
+                    { l: "Frecvență", v: `${(DIV_MONTHS[s.symbol] || []).length}x/an` },
+                    { l: "YoC", v: `${((s.annualDiv / s.invested) * 100).toFixed(2)}%`, c: THEME.gold },
+                  ].map(x => (
+                    <div key={x.l} style={{ background: THEME.bg, borderRadius: 5, padding: "7px 8px" }}>
+                      <div style={{ fontSize: 8, color: THEME.dim }}>{x.l}</div>
+                      <div style={{ fontFamily: "monospace", fontSize: 12, color: x.c || THEME.text }}>{x.v}</div>
+                    </div>
+                  ))}
                 </div>
-                <div style={{ textAlign: "center", marginTop: 8, fontSize: 10, color: THEME.dim }}>
-                  Poziție în range: <span style={{ color: THEME.gold }}>{fmt(posInRange, 1)}%</span>
+                {/* Payout sustainability bar */}
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                    <span style={{ fontSize: 9, color: THEME.dim }}>Sustenabilitate payout</span>
+                    <span style={{ fontSize: 9, color: s.payout > 80 ? THEME.red : s.payout > 65 ? THEME.gold : THEME.green }}>{s.payout > 80 ? "RISC" : s.payout > 65 ? "ATENȚIE" : "SIGUR"}</span>
+                  </div>
+                  <div style={{ height: 6, background: THEME.border, borderRadius: 3 }}>
+                    <div style={{ height: "100%", width: `${Math.min(100, s.payout)}%`, background: s.payout > 80 ? THEME.red : s.payout > 65 ? THEME.gold : THEME.green, borderRadius: 3 }} />
+                  </div>
                 </div>
-              </>
-            );
-          })()}
-        </Card>
-      </section>
+              </Card>
+            </section>
+          )}
+        </div>
+      )}
+
+      {/* ── SUB-TAB: RISC ── */}
+      {deepSubTab === "risc" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+          {/* Radar performanță */}
+          <section>
+            <SectionHeader>RADAR PERFORMANȚĂ MULTIDIMENSIONAL</SectionHeader>
+            <Card>
+              {radarItems.map(item => (
+                <div key={item.label} style={{ marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, color: THEME.text }}>{item.label}</span>
+                    <span style={{ fontFamily: "monospace", fontSize: 11, color: item.score >= 60 ? THEME.green : item.score >= 35 ? THEME.gold : THEME.red }}>
+                      {Math.round(item.score)}/100
+                    </span>
+                  </div>
+                  <div style={{ height: 8, background: THEME.border, borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{
+                      height: "100%",
+                      width: `${item.score}%`,
+                      background: item.score >= 60
+                        ? `linear-gradient(to right, ${THEME.green}99, ${THEME.green})`
+                        : item.score >= 35
+                        ? `linear-gradient(to right, ${THEME.gold}99, ${THEME.gold})`
+                        : `linear-gradient(to right, ${THEME.red}99, ${THEME.red})`,
+                      borderRadius: 4,
+                      transition: "width 0.6s ease"
+                    }} />
+                  </div>
+                </div>
+              ))}
+            </Card>
+          </section>
+
+          {/* VaR & Risk Metrics */}
+          <section>
+            <SectionHeader>DISTRIBUȚIE RANDAMENTE & RISK METRICS</SectionHeader>
+            <Card>
+              {returns.length >= 20 ? (
+                <VaRDistribution returns={returns} />
+              ) : (
+                <div style={{ color: THEME.dim, fontSize: 11, textAlign: "center", padding: "20px 0" }}>
+                  {loadingChart ? "⏳ Se calculează metricile de risc..." : "Date insuficiente pentru analiza de risc"}
+                </div>
+              )}
+            </Card>
+          </section>
+
+          {/* Factori de risc */}
+          <section>
+            <SectionHeader>FACTORI DE RISC IDENTIFICAȚI</SectionHeader>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {[
+                { cond: s.pe > 35 && s.pe < 500, label: "Evaluare Excesivă", desc: `P/E de ${s.pe.toFixed(1)} depășește 35x`, color: THEME.gold },
+                { cond: s.payout > 80 && s.divYield > 0 && s.sector !== "Real Estate", label: "Risc Tăiere Dividend", desc: `Payout de ${s.payout.toFixed(0)}% poate fi nesustenabil`, color: THEME.red },
+                { cond: s.beta > 1.5, label: "Volatilitate Ridicată", desc: `Beta de ${s.beta.toFixed(2)} indică volatilitate mare față de piață`, color: THEME.blue },
+                { cond: s.currentRatio < 1 && s.sector !== "Financials", label: "Lichiditate Scăzută", desc: `Current Ratio ${s.currentRatio.toFixed(2)} sub 1.0`, color: THEME.red },
+                { cond: s.profitMargin < 0, label: "Marjă Negativă", desc: `Compania operează în pierdere`, color: THEME.red },
+                { cond: (s.value / totals.value) * 100 > 15, label: "Concentrare Excesivă", desc: `Pondere de ${((s.value/totals.value)*100).toFixed(1)}% în portofoliu`, color: THEME.gold },
+              ].filter(r => r.cond).map(r => (
+                <div key={r.label} style={{ background: THEME.bg, borderLeft: `3px solid ${r.color}`, borderRadius: "0 6px 6px 0", padding: "10px 12px" }}>
+                  <div style={{ fontSize: 11, color: r.color, fontWeight: 500 }}>{r.label}</div>
+                  <div style={{ fontSize: 10, color: THEME.dim, marginTop: 2 }}>{r.desc}</div>
+                </div>
+              ))}
+              {[
+                s.pe <= 35 || s.pe >= 500,
+                s.payout <= 80 || s.divYield === 0 || s.sector === "Real Estate",
+                s.beta <= 1.5,
+                s.currentRatio >= 1 || s.sector === "Financials",
+                s.profitMargin >= 0,
+                (s.value / totals.value) * 100 <= 15,
+              ].every(Boolean) && (
+                <div style={{ background: THEME.bg, borderLeft: `3px solid ${THEME.green}`, borderRadius: "0 6px 6px 0", padding: "10px 12px" }}>
+                  <div style={{ fontSize: 11, color: THEME.green }}>✓ Niciun risc major identificat</div>
+                  <div style={{ fontSize: 10, color: THEME.dim, marginTop: 2 }}>Toți indicatorii sunt în parametri normali</div>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* ── SUB-TAB: POZIȚIE ── */}
+      {deepSubTab === "pozitie" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+          {/* Detalii poziție */}
+          <section>
+            <SectionHeader>DETALII POZIȚIE</SectionHeader>
+            <Card accent={THEME.gold}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {[
+                  { l: "Valoare Actuală", v: fmtUSD(s.value), c: THEME.text },
+                  { l: "Valoare Investită", v: fmtUSD(s.invested), c: THEME.dim },
+                  { l: "Profit Net ($)", v: `${sign(s.profit)}${fmtUSD(s.profit)}`, c: clr(s.profit) },
+                  { l: "Return (%)", v: `${sign(s.profitPct)}${fmt(s.profitPct, 2)}%`, c: clr(s.profitPct) },
+                  { l: "Nr. Acțiuni", v: s.shares, c: THEME.text },
+                  { l: "Preț Mediu", v: `$${fmt(s.avgCost)}`, c: THEME.text },
+                  { l: "Preț Curent", v: `$${fmt(s.price)}`, c: clr(s.dailyChg) },
+                  { l: "Pondere Port.", v: `${fmt((s.value / totals.value) * 100, 2)}%`, c: THEME.gold },
+                ].map(x => (
+                  <div key={x.l} style={{ background: THEME.bg, borderRadius: 6, padding: "8px 10px" }}>
+                    <div style={{ fontSize: 8, color: THEME.dim }}>{x.l}</div>
+                    <div style={{ fontFamily: "monospace", fontSize: 12, color: x.c, marginTop: 2 }}>{x.v}</div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </section>
+
+          {/* Breakeven analysis */}
+          <section>
+            <SectionHeader>ANALIZĂ BREAKEVEN</SectionHeader>
+            <Card>
+              {(() => {
+                const gap = s.price - s.avgCost;
+                const gapPct = (gap / s.avgCost) * 100;
+                const toBreak = gap < 0 ? Math.abs(gap) : 0;
+                const toBreakPct = gap < 0 ? Math.abs(gapPct) : 0;
+                return (
+                  <>
+                    <MetricRow label="Diferență față de cost" value={`${sign(gap)}$${Math.abs(gap).toFixed(2)}`} color={clr(gap)} />
+                    <MetricRow label="Return vs cost mediu" value={`${sign(gapPct)}${gapPct.toFixed(2)}%`} color={clr(gapPct)} />
+                    {toBreak > 0 && <MetricRow label="Necesar la breakeven" value={`+$${toBreak.toFixed(2)} (+${toBreakPct.toFixed(1)}%)`} color={THEME.gold} />}
+                    {s.divYield > 0 && <MetricRow label="YoC (Yield on Cost)" value={`${((s.annualDiv / s.invested) * 100).toFixed(2)}%`} color={THEME.gold} />}
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 9, color: THEME.dim, marginBottom: 4 }}>Recuperare investiție prin dividende</div>
+                      <div style={{ height: 8, background: THEME.border, borderRadius: 4 }}>
+                        {s.annualDiv > 0 && (
+                          <div style={{
+                            height: "100%",
+                            width: `${Math.min(100, (s.annualDiv / s.invested) * 100 * 15)}%`,
+                            background: THEME.gold, borderRadius: 4
+                          }} />
+                        )}
+                      </div>
+                      <div style={{ fontSize: 9, color: THEME.dim, marginTop: 3 }}>
+                        {s.annualDiv > 0
+                          ? `Recuperare completă în ~${(s.invested / s.annualDiv).toFixed(0)} ani la dividendul actual`
+                          : "Fără dividend — recuperare exclusiv prin aprecierea prețului"}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </Card>
+          </section>
+
+          {/* Scenarii DCA */}
+          <section>
+            <SectionHeader>SCENARII ACHIZIȚIE ADIȚIONALĂ</SectionHeader>
+            <Card>
+              <div style={{ fontSize: 10, color: THEME.dim, marginBottom: 10 }}>Impact DCA la prețul curent de ${fmt(s.price)}</div>
+              {[100, 250, 500, 1000].map(cap => {
+                const newShares = Math.floor(cap / s.price);
+                const totalShares = s.shares + newShares;
+                const totalInvested = s.invested + cap;
+                const newAvg = totalInvested / totalShares;
+                const newProfit = totalShares * s.price - totalInvested;
+                return (
+                  <div key={cap} style={{ padding: "8px 0", borderBottom: `1px solid ${THEME.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontFamily: "monospace", fontSize: 12, color: THEME.gold }}>${cap}</div>
+                      <div style={{ fontSize: 9, color: THEME.dim }}>+{newShares} acț · nou avg ${fmt(newAvg)}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontFamily: "monospace", fontSize: 11, color: clr(newProfit) }}>{sign(newProfit)}${Math.abs(newProfit).toFixed(0)}</div>
+                      <div style={{ fontSize: 9, color: THEME.dim }}>{totalShares} acț total</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </Card>
+          </section>
+
+          {/* Evoluție zilnică vs portofoliu */}
+          <section>
+            <SectionHeader>CONTRIBUȚIE LA MIȘCAREA ZILNICĂ</SectionHeader>
+            <Card>
+              {(() => {
+                const stockDailyUSD = s.prevValue * (s.dailyChg / 100);
+                const portDailyUSD = totals.value - totals.prevValue;
+                const contribution = portDailyUSD !== 0 ? (stockDailyUSD / portDailyUSD) * 100 : 0;
+                return (
+                  <>
+                    <MetricRow label="Mișcare activ ($)" value={`${sign(stockDailyUSD)}$${Math.abs(stockDailyUSD).toFixed(2)}`} color={clr(stockDailyUSD)} />
+                    <MetricRow label="Variație zilnică (%)" value={`${sign(s.dailyChg)}${fmt(s.dailyChg, 2)}%`} color={clr(s.dailyChg)} />
+                    <MetricRow label="Contribuție la port." value={`${sign(contribution)}${Math.abs(contribution).toFixed(1)}%`} color={clr(contribution)} />
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 9, color: THEME.dim, marginBottom: 4 }}>Contribuție la mișcarea totală a zilei</div>
+                      <div style={{ height: 8, background: THEME.border, borderRadius: 4, position: "relative", overflow: "hidden" }}>
+                        <div style={{
+                          position: "absolute",
+                          left: contribution < 0 ? `${Math.max(0, 50 + contribution / 2)}%` : "50%",
+                          width: `${Math.min(50, Math.abs(contribution) / 2)}%`,
+                          top: 0, bottom: 0,
+                          background: clr(contribution),
+                          borderRadius: 4
+                        }} />
+                        <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: THEME.dim }} />
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </Card>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
