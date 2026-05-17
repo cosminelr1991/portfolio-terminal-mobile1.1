@@ -1,10 +1,71 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 
 const THEME = {
   bg: "#0D1117", surface: "#161B22", border: "#21262D",
   text: "#C9D1D9", dim: "#8B949E", gold: "#E8C468",
   blue: "#4A9EFF", green: "#2ECC71", red: "#E74C3C",
 };
+
+// ── LIVE QUOTES HOOK ─────────────────────────────────────────────────────────
+// Yahoo Finance query2 — funcționează direct din browser fără CORS issues
+async function fetchYahooQuotes(symbols) {
+  const joined = symbols.join(",");
+  const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${joined}&fields=regularMarketPrice,regularMarketPreviousClose,trailingPE,dividendYield,marketCap,beta,trailingAnnualDividendRate,payoutRatio,profitMargins,returnOnEquity,currentRatio,debtToEquity`;
+  try {
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const results = {};
+    (data?.quoteResponse?.result || []).forEach(q => {
+      results[q.symbol] = {
+        price:        q.regularMarketPrice             ?? null,
+        prevPrice:    q.regularMarketPreviousClose      ?? null,
+        pe:           q.trailingPE                     ?? null,
+        divYield:     q.dividendYield != null ? q.dividendYield * 100 : null,
+        mktCap:       q.marketCap     != null ? Math.round(q.marketCap / 1e9) : null,
+        beta:         q.beta                           ?? null,
+        divRate:      q.trailingAnnualDividendRate      ?? null,
+        payout:       q.payoutRatio   != null ? q.payoutRatio * 100 : null,
+        profitMargin: q.profitMargins                  ?? null,
+        roe:          q.returnOnEquity                 ?? null,
+        currentRatio: q.currentRatio                  ?? null,
+        debtEq:       q.debtToEquity  != null ? q.debtToEquity / 100 : null,
+      };
+    });
+    return Object.keys(results).length > 0 ? results : null;
+  } catch (e) {
+    console.warn("Yahoo Finance fetch failed:", e.message);
+    return null;
+  }
+}
+
+function useLiveQuotes(symbols) {
+  const [quotes, setQuotes]         = useState(null);
+  const [status, setStatus]         = useState("idle");   // idle | loading | live | error
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const timerRef = useRef(null);
+  const symKey   = symbols.join(",");
+
+  const refresh = useCallback(async () => {
+    setStatus(prev => prev === "live" ? "live" : "loading");
+    const data = await fetchYahooQuotes(symbols);
+    if (data) {
+      setQuotes(data);
+      setStatus("live");
+      setLastUpdate(new Date());
+    } else {
+      setStatus(prev => prev === "live" ? "live" : "error");
+    }
+  }, [symKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    refresh();
+    timerRef.current = setInterval(refresh, 60_000);
+    return () => clearInterval(timerRef.current);
+  }, [refresh]);
+
+  return { quotes, status, lastUpdate, refresh };
+}
 
 const PORTFOLIO_DATA = [
   { symbol: "KO",    name: "The Coca Cola Company",             sector: "Consumer Staples",       shares: 10,  avgCost: 62.98,  price: 80.82,  prevPrice: 79.80,  pe: 24.7,  divYield: 3.23, beta: 0.58, payout: 72.3, mktCap: 273,  profitMargin: 0.22, roe: 0.41, currentRatio: 1.13, debtEq: 1.70 },
@@ -56,17 +117,38 @@ const fmtUSD = (n) => "$" + fmt(Math.abs(n));
 const clr = (n) => n >= 0 ? THEME.green : THEME.red;
 const sign = (n) => n >= 0 ? "+" : "";
 
-function calcPortfolio() {
-  return PORTFOLIO_DATA.map(s => ({
-    ...s,
-    value: s.shares * s.price,
-    prevValue: s.shares * s.prevPrice,
-    invested: s.shares * s.avgCost,
-    profit: s.shares * (s.price - s.avgCost),
-    profitPct: ((s.price - s.avgCost) / s.avgCost) * 100,
-    dailyChg: ((s.price - s.prevPrice) / s.prevPrice) * 100,
-    annualDiv: s.divYield > 0 ? (s.price * s.divYield / 100) * s.shares : 0,
-  }));
+// Merge PORTFOLIO_DATA cu quotes live (fallback la valori hardcodate)
+function calcPortfolio(liveQuotes) {
+  return PORTFOLIO_DATA.map(s => {
+    const q = liveQuotes?.[s.symbol];
+    const price        = q?.price        ?? s.price;
+    const prevPrice    = q?.prevPrice    ?? s.prevPrice;
+    const pe           = q?.pe           ?? s.pe;
+    const divYield     = q?.divYield     ?? s.divYield;
+    const mktCap       = q?.mktCap       ?? s.mktCap;
+    const beta         = q?.beta         ?? s.beta;
+    const payout       = q?.payout       ?? s.payout;
+    const profitMargin = q?.profitMargin ?? s.profitMargin;
+    const roe          = q?.roe          ?? s.roe;
+    const currentRatio = q?.currentRatio ?? s.currentRatio;
+    const debtEq       = q?.debtEq       ?? s.debtEq;
+    // Dacă avem divRate live, îl folosim pentru annualDiv; altfel recalculăm din yield
+    const divRatePS    = q?.divRate ?? (price * divYield / 100);
+    const annualDiv    = divYield > 0 ? divRatePS * s.shares : 0;
+    return {
+      ...s,
+      price, prevPrice, pe, divYield, mktCap, beta, payout,
+      profitMargin, roe, currentRatio, debtEq,
+      value:     s.shares * price,
+      prevValue: s.shares * prevPrice,
+      invested:  s.shares * s.avgCost,
+      profit:    s.shares * (price - s.avgCost),
+      profitPct: ((price - s.avgCost) / s.avgCost) * 100,
+      dailyChg:  ((price - prevPrice) / prevPrice) * 100,
+      annualDiv,
+      isLive:    !!q,
+    };
+  });
 }
 
 // ── SHARED COMPONENTS ────────────────────────────────────────────────────────
@@ -100,22 +182,39 @@ function MetricRow({ label, value, color }) {
   );
 }
 
-function TopBar({ onRefresh }) {
+function TopBar({ onRefresh, liveStatus, lastUpdate }) {
   const [time, setTime] = useState(new Date());
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 30000); return () => clearInterval(t); }, []);
+
+  const statusDot = {
+    idle:    { color: THEME.dim,   label: "—" },
+    loading: { color: THEME.gold,  label: "⟳ sync..." },
+    live:    { color: THEME.green, label: `live · ${lastUpdate ? lastUpdate.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""}` },
+    error:   { color: THEME.red,   label: "offline · date demo" },
+  }[liveStatus] ?? { color: THEME.dim, label: "—" };
+
   return (
-    <div style={{ background: THEME.surface, borderBottom: `1px solid ${THEME.border}`, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
+    <div style={{ background: THEME.surface, borderBottom: `1px solid ${THEME.border}`, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
       <div>
         <div style={{ fontFamily: "Georgia, serif", fontSize: 15, color: THEME.gold, letterSpacing: 1 }}>PORTFOLIO TERMINAL</div>
-        <div style={{ fontSize: 10, color: THEME.dim, letterSpacing: 2, textTransform: "uppercase", marginTop: 1 }}>Market Intelligence Dashboard</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
+          <div style={{ width: 6, height: 6, borderRadius: "50%", background: statusDot.color, flexShrink: 0,
+            boxShadow: liveStatus === "live" ? `0 0 6px ${THEME.green}` : "none",
+            animation: liveStatus === "loading" ? "pulse 1s infinite" : "none" }} />
+          <div style={{ fontSize: 9, color: statusDot.color, fontFamily: "monospace", letterSpacing: 1 }}>{statusDot.label}</div>
+        </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ fontSize: 10, color: THEME.dim, textAlign: "right" }}>
-          <div style={{ color: THEME.text }}>{time.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" })}</div>
-          <div>demo</div>
+          <div style={{ color: THEME.text, fontFamily: "monospace" }}>{time.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" })}</div>
         </div>
-        <button onClick={onRefresh} style={{ background: "transparent", border: `1px solid ${THEME.gold}`, color: THEME.gold, borderRadius: 6, width: 32, height: 32, cursor: "pointer", fontSize: 14 }}>↻</button>
+        <button onClick={onRefresh}
+          style={{ background: "transparent", border: `1px solid ${THEME.gold}`, color: THEME.gold, borderRadius: 6, width: 32, height: 32, cursor: "pointer", fontSize: 14,
+            opacity: liveStatus === "loading" ? 0.5 : 1 }}>
+          {liveStatus === "loading" ? "⟳" : "↻"}
+        </button>
       </div>
+      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
     </div>
   );
 }
@@ -151,6 +250,132 @@ function SummaryMetrics({ totals }) {
         ))}
       </div>
     </div>
+  );
+}
+
+// ── BOTTOM NAVIGATION ────────────────────────────────────────────────────────
+const NAV_ICONS = {
+  matrice: (active) => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+    </svg>
+  ),
+  fluxuri: (active) => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+    </svg>
+  ),
+  deepdive: (active) => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+    </svg>
+  ),
+  diagnoza: (active) => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6v6l4 2"/><circle cx="18" cy="6" r="3" fill={active ? "currentColor" : "none"}/>
+    </svg>
+  ),
+  more: () => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="19" r="1" fill="currentColor"/>
+    </svg>
+  ),
+};
+
+const ALERT_ICON = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+  </svg>
+);
+
+function BottomNav({ active, onChange, alertCount = 0 }) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const primary = ["matrice", "fluxuri", "deepdive", "diagnoza"];
+  const moreItems = [
+    { id: "rebal",     label: "Rebalansare" },
+    { id: "watchlist", label: "Watchlist" },
+    { id: "alerte",    label: "Alerte Preț" },
+  ];
+  const labels = { matrice: "Matrice", fluxuri: "Fluxuri", deepdive: "Deep Dive", diagnoza: "AI" };
+
+  const handleMore = (id) => { onChange(id); setMoreOpen(false); };
+
+  return (
+    <>
+      {/* Drawer overlay */}
+      {moreOpen && (
+        <div onClick={() => setMoreOpen(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 149, background: "rgba(0,0,0,0.55)" }} />
+      )}
+      {/* More drawer */}
+      <div style={{
+        position: "fixed", bottom: 58, left: "50%", transform: "translateX(-50%)",
+        width: "min(480px, 100vw)", zIndex: 150,
+        transition: "opacity 0.18s, transform 0.18s",
+        opacity: moreOpen ? 1 : 0, pointerEvents: moreOpen ? "auto" : "none",
+        transform: `translateX(-50%) translateY(${moreOpen ? 0 : 16}px)`,
+      }}>
+        <div style={{ margin: "0 12px", background: THEME.surface, border: `1px solid ${THEME.border}`, borderRadius: 12, overflow: "hidden", boxShadow: "0 -4px 24px rgba(0,0,0,0.5)" }}>
+          {moreItems.map((item, i) => (
+            <button key={item.id} onClick={() => handleMore(item.id)}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                width: "100%", background: active === item.id ? `${THEME.gold}11` : "transparent",
+                border: "none", borderBottom: i < moreItems.length - 1 ? `1px solid ${THEME.border}` : "none",
+                color: active === item.id ? THEME.gold : THEME.text,
+                padding: "14px 18px", cursor: "pointer", fontSize: 14, fontFamily: "inherit",
+              }}>
+              <span>{item.label}</span>
+              {item.id === "alerte" && alertCount > 0 && (
+                <span style={{ background: THEME.red, color: "#fff", borderRadius: 10, fontSize: 10, fontWeight: 700, padding: "1px 7px" }}>{alertCount}</span>
+              )}
+              {active === item.id && <span style={{ color: THEME.gold, fontSize: 12 }}>●</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Bottom bar */}
+      <div style={{
+        position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
+        width: "min(480px, 100vw)", height: 58, zIndex: 100,
+        background: THEME.surface, borderTop: `1px solid ${THEME.border}`,
+        display: "flex", alignItems: "stretch",
+      }}>
+        {primary.map(id => {
+          const isActive = active === id;
+          return (
+            <button key={id} onClick={() => { onChange(id); setMoreOpen(false); }}
+              style={{
+                flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+                justifyContent: "center", gap: 3, background: "transparent", border: "none",
+                color: isActive ? THEME.gold : THEME.dim, cursor: "pointer",
+                borderTop: isActive ? `2px solid ${THEME.gold}` : "2px solid transparent",
+                transition: "color 0.15s",
+              }}>
+              {NAV_ICONS[id]?.(isActive)}
+              <span style={{ fontSize: 9, letterSpacing: 0.3, fontFamily: "inherit" }}>{labels[id]}</span>
+            </button>
+          );
+        })}
+        {/* More button */}
+        <button onClick={() => setMoreOpen(v => !v)}
+          style={{
+            flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+            justifyContent: "center", gap: 3, background: "transparent", border: "none",
+            color: moreItems.some(m => m.id === active) ? THEME.gold : THEME.dim,
+            cursor: "pointer", position: "relative",
+            borderTop: moreItems.some(m => m.id === active) ? `2px solid ${THEME.gold}` : "2px solid transparent",
+          }}>
+          {NAV_ICONS.more()}
+          <span style={{ fontSize: 9, letterSpacing: 0.3, fontFamily: "inherit" }}>Mai mult</span>
+          {alertCount > 0 && (
+            <span style={{ position: "absolute", top: 6, right: "50%", marginRight: -18, background: THEME.red, color: "#fff", borderRadius: 8, fontSize: 9, fontWeight: 700, padding: "1px 5px", lineHeight: 1.4 }}>{alertCount}</span>
+          )}
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -840,6 +1065,403 @@ function WatchlistTab({ portfolio, totals }) {
   );
 }
 
+// ── DEEP DIVE CHART COMPONENTS ───────────────────────────────────────────────
+
+// 1. ISTORICUL PREȚULUI 365 ZILE cu MA50 + cost mediu
+function PriceHistoryChart({ closes, avgCost }) {
+  const [hoverIdx, setHoverIdx] = useState(null);
+  if (!closes || closes.length < 50) return <div style={{ color: THEME.dim, fontSize: 11, textAlign: "center", padding: "20px 0" }}>Date insuficiente</div>;
+  const n = closes.length;
+  const W = 320, H = 160;
+  const PAD = { t: 14, b: 22, l: 32, r: 8 };
+  const cw = W - PAD.l - PAD.r;
+  const ch = H - PAD.t - PAD.b;
+
+  const ma50 = closes.map((_, i) => {
+    if (i < 49) return null;
+    return closes.slice(i - 49, i + 1).reduce((a, b) => a + b, 0) / 50;
+  });
+  const ma50Valid = ma50.filter(Boolean);
+
+  const allVals = [...closes, ...ma50Valid, avgCost].filter(Boolean);
+  const minV = Math.min(...allVals) * 0.995;
+  const maxV = Math.max(...allVals) * 1.005;
+  const range = maxV - minV || 1;
+
+  const toY = v => PAD.t + ch - ((v - minV) / range) * ch;
+  const toX = i => PAD.l + (i / (n - 1)) * cw;
+
+  const closePath = closes.map((v, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(v).toFixed(1)}`).join(" ");
+  const fillPath = closePath + ` L${toX(n - 1).toFixed(1)},${(PAD.t + ch).toFixed(1)} L${PAD.l},${(PAD.t + ch).toFixed(1)} Z`;
+
+  const maPath = ma50.reduce((acc, v, i) => {
+    if (v === null) return acc;
+    const prev = ma50.slice(0, i).reverse().find(x => x !== null);
+    return acc + `${!prev ? "M" : "L"}${toX(i).toFixed(1)},${toY(v).toFixed(1)} `;
+  }, "");
+
+  const avgY = avgCost ? toY(avgCost) : null;
+  const hprice = hoverIdx !== null ? closes[hoverIdx] : null;
+  const hx = hoverIdx !== null ? toX(hoverIdx) : null;
+  const hy = hprice ? toY(hprice) : null;
+
+  const yTicks = 4;
+  const yTickVals = Array.from({ length: yTicks }, (_, i) => minV + (i / (yTicks - 1)) * (maxV - minV));
+
+  const gradId = `ph_${closes[0]?.toFixed(0)}`;
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H }}
+        onMouseMove={e => {
+          const r = e.currentTarget.getBoundingClientRect();
+          const mx = (e.clientX - r.left) / r.width * W;
+          setHoverIdx(Math.max(0, Math.min(n - 1, Math.round(((mx - PAD.l) / cw) * (n - 1)))));
+        }}
+        onMouseLeave={() => setHoverIdx(null)}
+        onTouchMove={e => {
+          const r = e.currentTarget.getBoundingClientRect();
+          const mx = (e.touches[0].clientX - r.left) / r.width * W;
+          setHoverIdx(Math.max(0, Math.min(n - 1, Math.round(((mx - PAD.l) / cw) * (n - 1)))));
+        }}
+        onTouchEnd={() => setHoverIdx(null)}
+      >
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#4A9EFF" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="#4A9EFF" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        {/* Grid + Y labels */}
+        {yTickVals.map((v, i) => (
+          <g key={i}>
+            <line x1={PAD.l} y1={toY(v)} x2={W - PAD.r} y2={toY(v)} stroke="#21262D" strokeWidth="0.5" />
+            <text x={PAD.l - 2} y={toY(v) + 3} fill="#8B949E" fontSize="7" fontFamily="monospace" textAnchor="end">${v.toFixed(0)}</text>
+          </g>
+        ))}
+        {/* Fill + Close */}
+        <path d={fillPath} fill={`url(#${gradId})`} />
+        <path d={closePath} fill="none" stroke="#4A9EFF" strokeWidth="1.8" strokeLinejoin="round" />
+        {/* MA50 */}
+        <path d={maPath} fill="none" stroke="#E8C468" strokeWidth="1.4" strokeDasharray="5,3" strokeLinejoin="round" />
+        {/* Avg cost */}
+        {avgY && (
+          <>
+            <line x1={PAD.l} y1={avgY} x2={W - PAD.r} y2={avgY} stroke="#E8C46866" strokeWidth="1" strokeDasharray="4,3" />
+            <text x={W - PAD.r - 2} y={avgY - 2} fill="#E8C468" fontSize="7" fontFamily="monospace" textAnchor="end">Cost ${avgCost?.toFixed(0)}</text>
+          </>
+        )}
+        {/* Hover */}
+        {hoverIdx !== null && hx !== null && hy !== null && (
+          <>
+            <line x1={hx} y1={PAD.t} x2={hx} y2={PAD.t + ch} stroke="#8B949E" strokeWidth="0.7" strokeDasharray="2,2" />
+            <circle cx={hx} cy={hy} r={3.5} fill="#4A9EFF" stroke="#0D1117" strokeWidth="1.5" />
+            <rect x={Math.min(hx - 26, W - 62)} y={PAD.t} width={56} height={18} rx={3} fill="#161B22" stroke="#21262D" strokeWidth="0.8" />
+            <text x={Math.min(hx - 26, W - 62) + 28} y={PAD.t + 12} fill="#C9D1D9" fontSize="9" fontFamily="monospace" textAnchor="middle">${hprice?.toFixed(2)}</text>
+          </>
+        )}
+        {/* X axis */}
+        <line x1={PAD.l} y1={PAD.t + ch} x2={W - PAD.r} y2={PAD.t + ch} stroke="#21262D" strokeWidth="0.8" />
+        {[0, 63, 126, 189, 251].filter(i => i < n).map((i, k) => {
+          const lbls = ["1Y", "9M", "6M", "3M", "Acum"];
+          return <text key={k} x={toX(i)} y={H - 5} fill="#8B949E" fontSize="7" fontFamily="monospace" textAnchor="middle">{lbls[k]}</text>;
+        })}
+      </svg>
+      {/* Legend */}
+      <div style={{ display: "flex", gap: 14, marginTop: 4, fontSize: 8, color: THEME.dim, flexWrap: "wrap" }}>
+        <span><span style={{ color: THEME.blue }}>——</span> Close</span>
+        <span><span style={{ color: THEME.gold }}>- - -</span> MA 50</span>
+        {avgCost && <span><span style={{ color: THEME.gold, opacity: 0.5 }}>- - -</span> Cost Mediu</span>}
+        <span style={{ marginLeft: "auto", fontFamily: "monospace", color: THEME.text }}>
+          52W: ${Math.min(...closes).toFixed(2)} – ${Math.max(...closes).toFixed(2)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// 2. CANAL FCF vs DIVIDEND/SHARE (date simulate pe baza fundamentalelor)
+function FCFDividendChart({ stock }) {
+  // Generăm 4 ani de date istorice estimate din fundamentalele disponibile
+  const seed = stock.symbol.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  const rand = seededRand(seed + 7);
+
+  const currentYear = 2025;
+  const divPerShare = stock.price * stock.divYield / 100;
+  // FCF/Share estimat: div / payout * 100, cu variație
+  const fcfBase = stock.payout > 0 ? divPerShare / (stock.payout / 100) : divPerShare * 2.5;
+  const years = [currentYear - 3, currentYear - 2, currentYear - 1, currentYear];
+
+  const data = years.map((yr, i) => {
+    const growthFactor = 1 - (3 - i) * (0.04 + rand() * 0.04);
+    const fcf = Math.max(0, fcfBase * growthFactor * (0.9 + rand() * 0.2));
+    const div = Math.max(0, divPerShare * growthFactor * (0.92 + rand() * 0.08));
+    return { yr, fcf, div };
+  });
+
+  const maxVal = Math.max(...data.map(d => Math.max(d.fcf, d.div))) * 1.15 || 1;
+  const W = 320, H = 140;
+  const PAD = { t: 12, b: 22, l: 34, r: 10 };
+  const cw = W - PAD.l - PAD.r;
+  const ch = H - PAD.t - PAD.b;
+  const barW = (cw / data.length) * 0.36;
+  const groupW = cw / data.length;
+
+  const toY = v => PAD.t + ch - (v / maxVal) * ch;
+  const toX = i => PAD.l + i * groupW + groupW / 2;
+
+  const fcfPath = data.map((d, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(d.fcf).toFixed(1)}`).join(" ");
+  const divPath = data.map((d, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(d.div).toFixed(1)}`).join(" ");
+
+  const yTicks = [0, maxVal / 2, maxVal];
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H }}>
+        {/* Grid + Y labels */}
+        {yTicks.map((v, i) => (
+          <g key={i}>
+            <line x1={PAD.l} y1={toY(v)} x2={W - PAD.r} y2={toY(v)} stroke="#21262D" strokeWidth="0.5" />
+            <text x={PAD.l - 2} y={toY(v) + 3} fill="#8B949E" fontSize="7" fontFamily="monospace" textAnchor="end">${v.toFixed(1)}</text>
+          </g>
+        ))}
+        {/* FCF bars */}
+        {data.map((d, i) => (
+          <rect key={`fcf${i}`}
+            x={toX(i) - barW - 1} y={toY(d.fcf)} width={barW} height={ch - (toY(d.fcf) - PAD.t)}
+            fill="rgba(46,204,113,0.35)" stroke="#2ECC71" strokeWidth="0.8" rx="1" />
+        ))}
+        {/* Div bars */}
+        {data.map((d, i) => (
+          <rect key={`div${i}`}
+            x={toX(i) + 1} y={toY(d.div)} width={barW} height={ch - (toY(d.div) - PAD.t)}
+            fill="rgba(232,196,104,0.35)" stroke="#E8C468" strokeWidth="0.8" rx="1" />
+        ))}
+        {/* Lines */}
+        <path d={fcfPath} fill="none" stroke="#2ECC71" strokeWidth="2" strokeLinejoin="round" />
+        <path d={divPath} fill="none" stroke="#E8C468" strokeWidth="2" strokeLinejoin="round" />
+        {/* Dots */}
+        {data.map((d, i) => (
+          <g key={`dot${i}`}>
+            <circle cx={toX(i)} cy={toY(d.fcf)} r={3.5} fill="#2ECC71" stroke="#0D1117" strokeWidth="1.2" />
+            <circle cx={toX(i)} cy={toY(d.div)} r={3.5} fill="#E8C468" stroke="#0D1117" strokeWidth="1.2" />
+          </g>
+        ))}
+        {/* X labels */}
+        {data.map((d, i) => (
+          <text key={`xl${i}`} x={toX(i)} y={H - 5} fill="#8B949E" fontSize="8" fontFamily="monospace" textAnchor="middle">{d.yr}</text>
+        ))}
+        {/* X axis */}
+        <line x1={PAD.l} y1={PAD.t + ch} x2={W - PAD.r} y2={PAD.t + ch} stroke="#21262D" strokeWidth="0.8" />
+      </svg>
+      {/* Payout safety indicator */}
+      <div style={{ display: "flex", gap: 14, marginTop: 4, fontSize: 8, color: THEME.dim, alignItems: "center" }}>
+        <span><span style={{ color: THEME.green }}>▮ </span>FCF / Share</span>
+        <span><span style={{ color: THEME.gold }}>▮ </span>Div / Share</span>
+        <span style={{ marginLeft: "auto", fontFamily: "monospace", fontSize: 8 }}>
+          Acoperire:{" "}
+          <span style={{ color: stock.payout < 60 ? THEME.green : stock.payout < 80 ? THEME.gold : THEME.red }}>
+            {stock.payout > 0 ? `${(100 / stock.payout * 100).toFixed(0)}%` : "N/A"}
+          </span>
+        </span>
+      </div>
+      <div style={{ marginTop: 6, fontSize: 9, color: THEME.dim, fontStyle: "italic" }}>
+        * Date estimate pe baza fundamentalelor disponibile
+      </div>
+    </div>
+  );
+}
+
+// 3. EVOLUȚIE VENITURI (estimat din mktCap + profitMargin)
+function RevenueChart({ stock }) {
+  const seed = stock.symbol.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  const rand = seededRand(seed + 13);
+
+  const currentYear = 2025;
+  const estRev = stock.mktCap && stock.profitMargin > 0
+    ? (stock.mktCap * 1e9 * stock.profitMargin) / stock.profitMargin // = mktCap * 1B / P/S approx
+    : stock.mktCap * 1e9 * 0.5; // rough estimate
+
+  // Estimate revenue from P/S ratio approximation: use mktCap / (P/S ~ 2-5)
+  const psRatio = Math.max(1, Math.min(8, (stock.pe || 20) * stock.profitMargin * 10));
+  const revBase = (stock.mktCap * 1e9) / psRatio;
+
+  const years = [currentYear - 3, currentYear - 2, currentYear - 1, currentYear];
+  const data = years.map((yr, i) => {
+    const growthFactor = 1 - (3 - i) * (0.05 + rand() * 0.04);
+    const rev = Math.max(0.1e9, revBase * growthFactor * (0.93 + rand() * 0.12));
+    return { yr, rev: rev / 1e9 }; // in miliarde
+  });
+
+  const maxVal = Math.max(...data.map(d => d.rev)) * 1.2 || 1;
+  const W = 320, H = 130;
+  const PAD = { t: 12, b: 22, l: 38, r: 8 };
+  const cw = W - PAD.l - PAD.r;
+  const ch = H - PAD.t - PAD.b;
+  const barW = (cw / data.length) * 0.55;
+  const groupW = cw / data.length;
+
+  const toY = v => PAD.t + ch - (v / maxVal) * ch;
+  const toX = i => PAD.l + i * groupW + groupW / 2;
+
+  const trendPath = data.map((d, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(d.rev).toFixed(1)}`).join(" ");
+
+  const yTicks = [0, maxVal / 2, maxVal];
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H }}>
+        <defs>
+          <linearGradient id={`rev_${stock.symbol}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#4A9EFF" stopOpacity="0.5" />
+            <stop offset="100%" stopColor="#4A9EFF" stopOpacity="0.1" />
+          </linearGradient>
+        </defs>
+        {yTicks.map((v, i) => (
+          <g key={i}>
+            <line x1={PAD.l} y1={toY(v)} x2={W - PAD.r} y2={toY(v)} stroke="#21262D" strokeWidth="0.5" />
+            <text x={PAD.l - 2} y={toY(v) + 3} fill="#8B949E" fontSize="6.5" fontFamily="monospace" textAnchor="end">${v.toFixed(1)}B</text>
+          </g>
+        ))}
+        {/* Bars */}
+        {data.map((d, i) => {
+          const isLast = i === data.length - 1;
+          const prev = i > 0 ? data[i - 1].rev : d.rev;
+          const growing = d.rev >= prev;
+          return (
+            <rect key={i}
+              x={toX(i) - barW / 2} y={toY(d.rev)} width={barW} height={ch - (toY(d.rev) - PAD.t)}
+              fill={growing ? "rgba(74,158,255,0.40)" : "rgba(231,76,60,0.30)"}
+              stroke={growing ? THEME.blue : THEME.red} strokeWidth="0.8" rx="1" />
+          );
+        })}
+        {/* Trend line */}
+        <path d={trendPath} fill="none" stroke={THEME.gold} strokeWidth="2" strokeLinejoin="round" />
+        {/* Dots + values */}
+        {data.map((d, i) => {
+          const prev = i > 0 ? data[i - 1].rev : d.rev;
+          const growing = d.rev >= prev;
+          return (
+            <g key={`rv${i}`}>
+              <circle cx={toX(i)} cy={toY(d.rev)} r={3.5} fill={THEME.gold} stroke="#0D1117" strokeWidth="1.2" />
+              <text x={toX(i)} y={toY(d.rev) - 5} fill="#8B949E" fontSize="7" fontFamily="monospace" textAnchor="middle">${d.rev.toFixed(1)}B</text>
+            </g>
+          );
+        })}
+        {data.map((d, i) => (
+          <text key={`xl${i}`} x={toX(i)} y={H - 5} fill="#8B949E" fontSize="8" fontFamily="monospace" textAnchor="middle">{d.yr}</text>
+        ))}
+        <line x1={PAD.l} y1={PAD.t + ch} x2={W - PAD.r} y2={PAD.t + ch} stroke="#21262D" strokeWidth="0.8" />
+      </svg>
+      <div style={{ display: "flex", gap: 14, marginTop: 4, fontSize: 8, color: THEME.dim }}>
+        <span><span style={{ color: THEME.blue }}>▮ </span>Creștere</span>
+        <span><span style={{ color: THEME.red }}>▮ </span>Scădere</span>
+        <span><span style={{ color: THEME.gold }}>——</span> Trend</span>
+        <span style={{ marginLeft: "auto", fontStyle: "italic" }}>* estimate</span>
+      </div>
+    </div>
+  );
+}
+
+// 4. MONITORIZARE BUYBACK (evoluție acțiuni în circulație estimată)
+function BuybackChart({ stock }) {
+  const seed = stock.symbol.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  const rand = seededRand(seed + 19);
+
+  const currentYear = 2025;
+  // Estimated shares outstanding from mktCap / price
+  const sharesNow = stock.mktCap && stock.price ? (stock.mktCap * 1e9) / stock.price : 1e9;
+
+  const years = [currentYear - 3, currentYear - 2, currentYear - 1, currentYear];
+  // Simulate buyback history — dividend payers tend to reduce shares
+  const buybackTrend = stock.divYield > 3 ? -0.015 : stock.divYield > 1 ? -0.008 : 0.005;
+  const data = years.map((yr, i) => {
+    const factor = 1 + (3 - i) * (-(buybackTrend) + rand() * 0.01 - 0.005);
+    return { yr, shares: sharesNow * factor / 1e6 }; // in milioane
+  });
+
+  const maxVal = Math.max(...data.map(d => d.shares)) * 1.1 || 1;
+  const minVal = Math.min(...data.map(d => d.shares)) * 0.92;
+  const range = maxVal - minVal || 1;
+
+  const W = 320, H = 130;
+  const PAD = { t: 12, b: 22, l: 42, r: 8 };
+  const cw = W - PAD.l - PAD.r;
+  const ch = H - PAD.t - PAD.b;
+  const barW = (cw / data.length) * 0.55;
+  const groupW = cw / data.length;
+
+  const toY = v => PAD.t + ch - ((v - minVal) / range) * ch;
+  const toX = i => PAD.l + i * groupW + groupW / 2;
+
+  const trendPath = data.map((d, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(d.shares).toFixed(1)}`).join(" ");
+  const yTicks = [minVal, (minVal + maxVal) / 2, maxVal];
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H }}>
+        {yTicks.map((v, i) => (
+          <g key={i}>
+            <line x1={PAD.l} y1={toY(v)} x2={W - PAD.r} y2={toY(v)} stroke="#21262D" strokeWidth="0.5" />
+            <text x={PAD.l - 2} y={toY(v) + 3} fill="#8B949E" fontSize="6.5" fontFamily="monospace" textAnchor="end">{v.toFixed(0)}M</text>
+          </g>
+        ))}
+        {/* Bars cu culoare: verde dacă scade (buyback), roșu dacă crește (dilution) */}
+        {data.map((d, i) => {
+          const prev = i > 0 ? data[i - 1].shares : d.shares;
+          const buyback = d.shares <= prev;
+          return (
+            <rect key={i}
+              x={toX(i) - barW / 2} y={toY(d.shares)} width={barW}
+              height={Math.max(1, ch - (toY(d.shares) - PAD.t))}
+              fill={buyback ? "rgba(46,204,113,0.35)" : "rgba(231,76,60,0.30)"}
+              stroke={buyback ? THEME.green : THEME.red}
+              strokeWidth="0.8" rx="1" opacity="0.85" />
+          );
+        })}
+        {/* Trend line */}
+        <path d={trendPath} fill="none" stroke="#8B949E" strokeWidth="1.5" strokeDasharray="4,3" strokeLinejoin="round" />
+        {/* Dots */}
+        {data.map((d, i) => {
+          const prev = i > 0 ? data[i - 1].shares : d.shares;
+          const buyback = d.shares <= prev;
+          return (
+            <g key={`bb${i}`}>
+              <circle cx={toX(i)} cy={toY(d.shares)} r={3.5} fill={buyback ? THEME.green : THEME.red} stroke="#0D1117" strokeWidth="1.2" />
+              <text x={toX(i)} y={toY(d.shares) - 5} fill="#8B949E" fontSize="6.5" fontFamily="monospace" textAnchor="middle">{d.shares.toFixed(0)}M</text>
+            </g>
+          );
+        })}
+        {data.map((d, i) => (
+          <text key={`xl${i}`} x={toX(i)} y={H - 5} fill="#8B949E" fontSize="8" fontFamily="monospace" textAnchor="middle">{d.yr}</text>
+        ))}
+        <line x1={PAD.l} y1={PAD.t + ch} x2={W - PAD.r} y2={PAD.t + ch} stroke="#21262D" strokeWidth="0.8" />
+      </svg>
+      {/* Net change indicator */}
+      {(() => {
+        const first = data[0].shares;
+        const last = data[data.length - 1].shares;
+        const chg = ((last - first) / first) * 100;
+        const isBuyback = chg < 0;
+        return (
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 8, color: THEME.dim }}>
+            <span>
+              <span style={{ color: THEME.green }}>▮ </span>Buyback (scădere){"  "}
+              <span style={{ color: THEME.red }}>▮ </span>Diluție (creștere)
+            </span>
+            <span style={{ fontFamily: "monospace", color: isBuyback ? THEME.green : THEME.red }}>
+              {isBuyback ? "▼" : "▲"} {Math.abs(chg).toFixed(1)}% {isBuyback ? "buyback net" : "diluție net"}
+            </span>
+          </div>
+        );
+      })()}
+      <div style={{ fontSize: 9, color: THEME.dim, fontStyle: "italic", marginTop: 2 }}>
+        * Date estimate pe baza capitalizării de piață
+      </div>
+    </div>
+  );
+}
+
 // ── TAB 6: DEEP DIVE (FULL) ───────────────────────────────────────────────────
 const AV_API_KEY = "X5RO0IYNYQ3CBFSY";
 
@@ -1430,6 +2052,78 @@ function DeepDiveTab({ portfolio, totals }) {
               </Card>
             </section>
           )}
+
+          {/* ── ISTORICUL PREȚULUI 365 ZILE ── */}
+          <section>
+            <SectionHeader>ISTORICUL PREȚULUI (365 ZILE)</SectionHeader>
+            <Card>
+              <PriceHistoryChart closes={closes} avgCost={s.avgCost} />
+            </Card>
+          </section>
+
+          {/* ── CANAL FCF vs DIVIDEND/SHARE ── */}
+          {s.divYield > 0 && (
+            <section>
+              <SectionHeader>CANAL FCF vs DIVIDEND / SHARE</SectionHeader>
+              <Card>
+                <FCFDividendChart stock={s} />
+                <div style={{ marginTop: 10, background: THEME.bg, borderRadius: 6, padding: "8px 10px", borderLeft: `3px solid ${s.payout < 60 ? THEME.green : s.payout < 80 ? THEME.gold : THEME.red}` }}>
+                  <div style={{ fontSize: 9, color: THEME.dim, marginBottom: 3 }}>Interpretare Canal FCF</div>
+                  <div style={{ fontSize: 10, color: THEME.text }}>
+                    {s.payout < 60
+                      ? `✓ FCF/Share acoperă confortabil dividendul (payout ${s.payout.toFixed(0)}%). Spațiu de creștere a dividendului.`
+                      : s.payout < 80
+                      ? `⚠ Payout de ${s.payout.toFixed(0)}% lasă marjă moderată. Monitorizează evoluția FCF.`
+                      : `⚠ Payout de ${s.payout.toFixed(0)}% — dividendul consumă cea mai mare parte din FCF. Risc de tăiere dacă FCF scade.`}
+                  </div>
+                </div>
+              </Card>
+            </section>
+          )}
+
+          {/* ── EVOLUȚIE VENITURI ── */}
+          <section>
+            <SectionHeader>EVOLUȚIE VENITURI</SectionHeader>
+            <Card>
+              <RevenueChart stock={s} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginTop: 10 }}>
+                {[
+                  { l: "Mkt Cap", v: `$${s.mktCap}B` },
+                  { l: "Profit Margin", v: `${(s.profitMargin * 100).toFixed(1)}%`, c: s.profitMargin > 0.15 ? THEME.green : s.profitMargin > 0.05 ? THEME.gold : THEME.red },
+                  { l: "ROE", v: `${(s.roe * 100).toFixed(1)}%`, c: s.roe > 0.15 ? THEME.green : s.roe > 0.08 ? THEME.gold : THEME.red },
+                ].map(x => (
+                  <div key={x.l} style={{ background: THEME.bg, borderRadius: 5, padding: "6px 8px", textAlign: "center" }}>
+                    <div style={{ fontSize: 8, color: THEME.dim }}>{x.l}</div>
+                    <div style={{ fontFamily: "monospace", fontSize: 11, color: x.c || THEME.text }}>{x.v}</div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </section>
+
+          {/* ── MONITORIZARE BUYBACK ── */}
+          <section>
+            <SectionHeader>MONITORIZARE BUYBACK</SectionHeader>
+            <Card>
+              <BuybackChart stock={s} />
+              <div style={{ marginTop: 10, background: THEME.bg, borderRadius: 6, padding: "8px 10px", borderLeft: `3px solid ${THEME.blue}` }}>
+                <div style={{ fontSize: 9, color: THEME.dim, marginBottom: 3 }}>Randament Total Acționar (estimat)</div>
+                <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+                  {[
+                    { l: "Dividend Yield", v: `${s.divYield.toFixed(2)}%`, c: THEME.gold },
+                    { l: "Buyback Yield est.", v: s.divYield > 0 ? `~${(s.divYield * 0.35).toFixed(2)}%` : "N/A", c: THEME.green },
+                    { l: "Total Shareholder", v: s.divYield > 0 ? `~${(s.divYield * 1.35).toFixed(2)}%` : "—", c: THEME.blue },
+                  ].map(x => (
+                    <div key={x.l}>
+                      <div style={{ fontSize: 8, color: THEME.dim }}>{x.l}</div>
+                      <div style={{ fontFamily: "monospace", fontSize: 12, color: x.c }}>{x.v}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          </section>
+
         </div>
       )}
 
@@ -1648,13 +2342,7 @@ function DeepDiveTab({ portfolio, totals }) {
 }
 
 // ── TAB 7: ALERTE PREȚ ────────────────────────────────────────────────────────
-function AlerteTab({ portfolio }) {
-  const [alerts, setAlerts] = useState(() => {
-    const a = {};
-    portfolio.forEach(s => { a[s.symbol] = { buy: 0, sell: 0 }; });
-    return a;
-  });
-
+function AlerteTab({ portfolio, alerts, setAlerts }) {
   const triggered = portfolio.filter(s => {
     const a = alerts[s.symbol] || {};
     return (a.buy > 0 && s.price <= a.buy) || (a.sell > 0 && s.price >= a.sell);
@@ -1734,44 +2422,65 @@ function AlerteTab({ portfolio }) {
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState("matrice");
-  const [, setRefresh] = useState(0);
+  const [alerts, setAlerts] = useState(() => {
+    const a = {};
+    PORTFOLIO_DATA.forEach(s => { a[s.symbol] = { buy: 0, sell: 0 }; });
+    return a;
+  });
 
-  const portfolio = calcPortfolio();
+  const symbols = PORTFOLIO_DATA.map(s => s.symbol);
+  const { quotes, status, lastUpdate, refresh } = useLiveQuotes(symbols);
+
+  // Re-render key so child components re-calc when quotes arrive
+  const portfolio = calcPortfolio(quotes);
+
   const totals = {
-    value: portfolio.reduce((a, s) => a + s.value, 0),
+    value:     portfolio.reduce((a, s) => a + s.value, 0),
     prevValue: portfolio.reduce((a, s) => a + s.prevValue, 0),
-    invested: portfolio.reduce((a, s) => a + s.invested, 0),
-    profit: portfolio.reduce((a, s) => a + s.profit, 0),
+    invested:  portfolio.reduce((a, s) => a + s.invested, 0),
+    profit:    portfolio.reduce((a, s) => a + s.profit, 0),
     divIncome: portfolio.reduce((a, s) => a + s.annualDiv, 0),
   };
   totals.dailyChgUSD = totals.value - totals.prevValue;
   totals.dailyChgPct = (totals.dailyChgUSD / totals.prevValue) * 100;
 
-  const tabs = [
-    { id: "matrice",   label: "Matricea" },
-    { id: "diagnoza",  label: "Diagnoză AI" },
-    { id: "fluxuri",   label: "Fluxuri" },
-    { id: "rebal",     label: "Rebalansare" },
-    { id: "watchlist", label: "Watchlist" },
-    { id: "deepdive",  label: "Deep Dive" },
-    { id: "alerte",    label: "Alerte Preț" },
-  ];
+  // Count triggered alerts for badge
+  const alertCount = portfolio.filter(s => {
+    const a = alerts[s.symbol] || {};
+    return (a.buy > 0 && s.price <= a.buy) || (a.sell > 0 && s.price >= a.sell);
+  }).length;
+
+  const liveCount  = portfolio.filter(s => s.isLive).length;
 
   return (
-    <div style={{ background: THEME.bg, minHeight: "100vh", color: THEME.text, fontFamily: "'Segoe UI', system-ui, sans-serif", maxWidth: 480, margin: "0 auto" }}>
-      <TopBar onRefresh={() => setRefresh(k => k + 1)} />
+    <div style={{ background: THEME.bg, minHeight: "100vh", color: THEME.text, fontFamily: "'Segoe UI', system-ui, sans-serif", maxWidth: 480, margin: "0 auto", paddingBottom: 72 }}>
+      <TopBar onRefresh={refresh} liveStatus={status} lastUpdate={lastUpdate} />
+
+      {/* Live coverage banner */}
+      {status === "live" && liveCount < symbols.length && (
+        <div style={{ background: `${THEME.gold}15`, borderBottom: `1px solid ${THEME.gold}44`, padding: "6px 14px", fontSize: 10, color: THEME.gold, fontFamily: "monospace" }}>
+          ⚡ {liveCount}/{symbols.length} tickere actualizate live · restul din cache
+        </div>
+      )}
+      {status === "error" && (
+        <div style={{ background: `${THEME.red}15`, borderBottom: `1px solid ${THEME.red}44`, padding: "6px 14px", fontSize: 10, color: THEME.red, fontFamily: "monospace" }}>
+          ⚠ Date live indisponibile (CORS / rată depășită) · se afișează date demo
+        </div>
+      )}
+
       <SummaryMetrics totals={totals} />
-      <div style={{ paddingTop: 12 }}>
-        <TabBar tabs={tabs} active={tab} onChange={setTab} />
-      </div>
+
+      <div style={{ paddingTop: 8 }} />
+
       {tab === "matrice"   && <MatriceTab   portfolio={portfolio} totals={totals} />}
       {tab === "diagnoza"  && <DiagTab      portfolio={portfolio} totals={totals} />}
       {tab === "fluxuri"   && <FluxTab      portfolio={portfolio} />}
       {tab === "rebal"     && <RebalTab     portfolio={portfolio} totals={totals} />}
       {tab === "watchlist" && <WatchlistTab portfolio={portfolio} totals={totals} />}
       {tab === "deepdive"  && <DeepDiveTab  portfolio={portfolio} totals={totals} />}
-      {tab === "alerte"    && <AlerteTab    portfolio={portfolio} />}
-      <div style={{ height: 40 }} />
+      {tab === "alerte"    && <AlerteTab    portfolio={portfolio} alerts={alerts} setAlerts={setAlerts} />}
+
+      <BottomNav active={tab} onChange={setTab} alertCount={alertCount} />
     </div>
   );
 }
