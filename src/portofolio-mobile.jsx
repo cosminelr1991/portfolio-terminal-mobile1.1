@@ -900,28 +900,80 @@ function MatriceTab({ portfolio, totals, onStockSelect }) {
 function DiagTab({ portfolio, totals }) {
   const [aiText, setAiText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [aiSource, setAiSource] = useState(null);
+
+  const buildLocalDiagnosis = useCallback(() => {
+    const profitPct = totals.invested ? (totals.profit / totals.invested) * 100 : 0;
+    const topWinners = [...portfolio].sort((a, b) => b.profitPct - a.profitPct).slice(0, 3).map(s => s.symbol).join(", ");
+    const riskNames = portfolio
+      .filter(s => (s.payout > 80 && s.divYield > 0) || (s.pe > 35 && s.pe < 500) || s.beta > 1.5)
+      .slice(0, 4)
+      .map(s => s.symbol)
+      .join(", ") || "none";
+    const income = totals.divIncome || 0;
+
+    return [
+      "EXECUTIVE SUMMARY",
+      `Portfolio value is $${totals.value.toFixed(0)}, with unrealized P/L of ${sign(totals.profit)}$${Math.abs(totals.profit).toFixed(0)} (${sign(profitPct)}${profitPct.toFixed(1)}%). Estimated annual dividend income is $${income.toFixed(0)}.`,
+      "",
+      "STRENGTHS",
+      `Best contributors by return: ${topWinners || "not available"}. The portfolio has diversified exposure across ${new Set(portfolio.map(s => s.sector)).size} sectors.`,
+      "",
+      "RISKS",
+      `Primary watchlist tickers: ${riskNames}. Review payout ratios, high valuation names, and position concentration before adding capital.`,
+      "",
+      "ACTIONS",
+      "Use new capital selectively, prioritize quality names trading near or below cost, and keep dividend sustainability ahead of headline yield."
+    ].join("\n");
+  }, [portfolio, totals]);
 
   const runAI = useCallback(async () => {
     setLoading(true);
     setAiText("");
-    const lines = portfolio.map(s =>
-      `- ${s.symbol}: P/E=${s.pe.toFixed(1)}, Beta=${s.beta.toFixed(2)}, Profit%=${s.profitPct.toFixed(1)}%, Pondere=${fmt((s.value / totals.value) * 100, 1)}%, DivYield=${s.divYield.toFixed(2)}%, Payout=${s.payout.toFixed(0)}%, ProfitMargin=${(s.profitMargin * 100).toFixed(1)}%, ROE=${(s.roe * 100).toFixed(1)}%, CurrentRatio=${s.currentRatio.toFixed(2)}, Sector=${s.sector}`
-    ).join("\n");
-    const pct = ((totals.profit / totals.invested) * 100).toFixed(1);
-    const prompt = `Ești un analist financiar senior. Analizează acest portofoliu și oferă comentariu profesionist în română (max 250 cuvinte, fără markdown, text simplu cu secțiuni pe linii noi).\n\nPortofoliu: Valoare $${totals.value.toFixed(0)}, Profit $${totals.profit.toFixed(0)} (${pct}%), Dividende anuale $${totals.divIncome.toFixed(0)}\n\n${lines}\n\nStructură răspuns:\nREZUMAT EXECUTIV (2-3 fraze)\nPUNCTE FORTE (max 3, cu ticker-ele specifice)\nRISCURI IDENTIFICATE (max 3 concrete)\nRECOMANDĂRI (max 3 acțiuni concrete)`;
+    setAiSource(null);
+
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/portfolio-diagnosis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
+        body: JSON.stringify({
+          totals,
+          holdings: portfolio.map(s => ({
+            symbol: s.symbol,
+            name: s.name,
+            sector: s.sector,
+            price: s.price,
+            shares: s.shares,
+            value: s.value,
+            invested: s.invested,
+            profit: s.profit,
+            profitPct: s.profitPct,
+            dailyChg: s.dailyChg,
+            weight: totals.value ? (s.value / totals.value) * 100 : 0,
+            pe: s.pe,
+            beta: s.beta,
+            divYield: s.divYield,
+            annualDiv: s.annualDiv,
+            payout: s.payout,
+            profitMargin: s.profitMargin,
+            roe: s.roe,
+            currentRatio: s.currentRatio,
+            debtEq: s.debtEq,
+          })),
+        })
       });
+
       const data = await res.json();
-      setAiText(data.content?.[0]?.text || "Eroare la generare.");
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setAiText(data.analysis || buildLocalDiagnosis());
+      setAiSource(data.source || "openai");
     } catch (e) {
-      setAiText("Eroare de conexiune.");
+      console.warn("AI diagnosis failed:", e);
+      setAiText(buildLocalDiagnosis());
+      setAiSource("local");
     }
     setLoading(false);
-  }, [portfolio, totals]);
+  }, [portfolio, totals, buildLocalDiagnosis]);
 
   const flags = [
     { label: "High Valuation (P/E > 35)", color: THEME.gold, items: portfolio.filter(s => s.pe > 35 && s.pe < 500).sort((a, b) => b.pe - a.pe), val: s => `P/E ${s.pe.toFixed(1)}` },
@@ -937,8 +989,13 @@ function DiagTab({ portfolio, totals }) {
       <Card accent={THEME.gold}>
         <SectionHeader>AI DIAGNOSIS</SectionHeader>
         <button onClick={runAI} disabled={loading} style={{ background: "transparent", border: `1px solid ${THEME.gold}`, color: THEME.gold, borderRadius: 6, padding: "8px 14px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", marginBottom: 12, opacity: loading ? 0.6 : 1, width: "100%" }}>
-          {loading ? "⏳ Se analizează portofoliul..." : "🧠 Generează Analiză AI a Portofoliului"}
+          {loading ? "Analyzing portfolio..." : "Generate Portfolio Diagnosis"}
         </button>
+        {aiSource === "local" && (
+          <div style={{ fontSize: 10, color: THEME.gold, marginBottom: 10 }}>
+            AI service unavailable. Showing local rule-based diagnosis.
+          </div>
+        )}
         {aiText ? (
           <div style={{ fontSize: 12, color: THEME.text, lineHeight: 1.8, whiteSpace: "pre-line" }}>
             {aiText.split("\n").map((line, i) => {
@@ -947,7 +1004,7 @@ function DiagTab({ portfolio, totals }) {
             })}
           </div>
         ) : !loading && (
-          <div style={{ fontSize: 11, color: THEME.dim, fontStyle: "italic" }}>Apasă butonul pentru analiză narativă AI a portofoliului.</div>
+          <div style={{ fontSize: 11, color: THEME.dim, fontStyle: "italic" }}>Generate a concise AI-backed portfolio diagnosis.</div>
         )}
       </Card>
 
