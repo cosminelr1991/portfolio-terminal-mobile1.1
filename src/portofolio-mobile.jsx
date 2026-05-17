@@ -299,11 +299,11 @@ function SummaryMetrics({ totals }) {
   const pct = (totals.profit / totals.invested) * 100;
   const yoc = (totals.divIncome / totals.invested) * 100;
   const metrics = [
-    { label: "VALOARE TOTALĂ", value: `$${fmt(totals.value)}`, delta: null },
-    { label: "PROFIT NEREALIZAT", value: `${sign(totals.profit)}$${fmt(Math.abs(totals.profit))}`, delta: `${sign(pct)}${fmt(pct, 2)}%`, dc: clr(totals.profit) },
-    { label: "EVOLUȚIE ZILNICĂ", value: `${sign(totals.dailyChgUSD)}$${fmt(Math.abs(totals.dailyChgUSD))}`, delta: `${sign(totals.dailyChgPct)}${fmt(totals.dailyChgPct, 2)}%`, dc: clr(totals.dailyChgUSD) },
-    { label: "FLUX DIVIDENDE/AN", value: `$${fmt(totals.divIncome)}`, delta: null },
-    { label: "RANDAMENT YoC", value: `${fmt(yoc, 2)}%`, delta: null },
+    { label: "PORTFOLIO VALUE", value: `$${fmt(totals.value)}`, delta: null },
+    { label: "UNREALIZED P/L", value: `${sign(totals.profit)}$${fmt(Math.abs(totals.profit))}`, delta: `${sign(pct)}${fmt(pct, 2)}%`, dc: clr(totals.profit) },
+    { label: "DAILY CHANGE", value: `${sign(totals.dailyChgUSD)}$${fmt(Math.abs(totals.dailyChgUSD))}`, delta: `${sign(totals.dailyChgPct)}${fmt(totals.dailyChgPct, 2)}%`, dc: clr(totals.dailyChgUSD) },
+    { label: "ANNUAL INCOME", value: `$${fmt(totals.divIncome)}`, delta: null },
+    { label: "YIELD ON COST", value: `${fmt(yoc, 2)}%`, delta: null },
   ];
   return (
     <div style={{ padding: "14px 12px 0", display: "flex", flexDirection: "column", gap: 9 }}>
@@ -369,11 +369,11 @@ function BottomNav({ active, onChange, alertCount = 0 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const primary = ["matrice", "fluxuri", "deepdive", "diagnoza"];
   const moreItems = [
-    { id: "rebal",     label: "Rebalansare" },
+    { id: "rebal",     label: "Rebalance" },
     { id: "watchlist", label: "Watchlist" },
-    { id: "alerte",    label: "Alerte Preț" },
+    { id: "alerte",    label: "Price Alerts" },
   ];
-  const labels = { matrice: "Matrice", fluxuri: "Fluxuri", deepdive: "Deep Dive", diagnoza: "AI" };
+  const labels = { matrice: "Dashboard", fluxuri: "Income", deepdive: "Deep Dive", diagnoza: "AI" };
 
   const handleMore = (id) => { onChange(id); setMoreOpen(false); };
 
@@ -445,7 +445,7 @@ function BottomNav({ active, onChange, alertCount = 0 }) {
             borderTop: moreItems.some(m => m.id === active) ? `2px solid ${THEME.gold}` : "2px solid transparent",
           }}>
           {NAV_ICONS.more()}
-          <span style={{ fontSize: 9, letterSpacing: 0.3, fontFamily: "inherit" }}>Mai mult</span>
+          <span style={{ fontSize: 9, letterSpacing: 0.3, fontFamily: "inherit" }}>More</span>
           {alertCount > 0 && (
             <span style={{ position: "absolute", top: 6, right: "50%", marginRight: -18, background: THEME.red, color: "#fff", borderRadius: 8, fontSize: 9, fontWeight: 700, padding: "1px 5px", lineHeight: 1.4 }}>{alertCount}</span>
           )}
@@ -464,6 +464,108 @@ function TabBar({ tabs, active, onChange }) {
         </button>
       ))}
     </div>
+  );
+}
+
+function StockDetailSheet({ stock, totals, onClose, onDeepDive }) {
+  if (!stock) return null;
+
+  const weight = totals?.value ? (stock.value / totals.value) * 100 : 0;
+  const yoc = stock.invested ? (stock.annualDiv / stock.invested) * 100 : 0;
+  const riskTone =
+    stock.payout > 80 && stock.divYield > 0 ? THEME.red :
+    stock.pe > 35 && stock.pe < 500 ? THEME.gold :
+    stock.beta > 1.5 ? THEME.gold :
+    THEME.green;
+  const riskLabel =
+    stock.payout > 80 && stock.divYield > 0 ? "Dividend risk" :
+    stock.pe > 35 && stock.pe < 500 ? "High valuation" :
+    stock.beta > 1.5 ? "High beta" :
+    "Stable profile";
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.62)", zIndex: 190 }}
+      />
+      <div style={{
+        position: "fixed",
+        left: "50%",
+        bottom: 0,
+        transform: "translateX(-50%)",
+        width: "min(480px, 100vw)",
+        maxHeight: "82vh",
+        overflowY: "auto",
+        background: THEME.surface,
+        border: `1px solid ${THEME.border}`,
+        borderBottom: "none",
+        borderRadius: "14px 14px 0 0",
+        zIndex: 200,
+        boxShadow: "0 -14px 36px rgba(0,0,0,0.45)",
+        padding: "12px 14px 18px",
+        boxSizing: "border-box",
+      }}>
+        <div style={{ width: 42, height: 4, borderRadius: 99, background: THEME.border, margin: "0 auto 12px" }} />
+
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "flex-start" }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span style={{ fontFamily: FONT_MONO, fontSize: 20, color: THEME.gold }}>{stock.symbol}</span>
+              <Badge text={riskLabel} color={riskTone} bg={`${riskTone}1f`} />
+            </div>
+            <div style={{ fontSize: 13, color: THEME.text, lineHeight: 1.25 }}>{stock.name}</div>
+            <div style={{ fontSize: 10, color: THEME.dim, marginTop: 4 }}>{stock.sector}</div>
+          </div>
+          <button
+            onClick={onClose}
+            title="Close"
+            style={{ width: 32, height: 32, borderRadius: 6, border: `1px solid ${THEME.border}`, background: "transparent", color: THEME.dim, fontSize: 18, cursor: "pointer", flexShrink: 0 }}
+          >
+            ×
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 14 }}>
+          {[
+            { l: "Price", v: `$${fmt(stock.price)}`, c: clr(stock.dailyChg) },
+            { l: "Daily", v: `${sign(stock.dailyChg)}${fmt(stock.dailyChg, 2)}%`, c: clr(stock.dailyChg) },
+            { l: "Position", v: fmtUSD(stock.value) },
+            { l: "Weight", v: `${fmt(weight, 2)}%`, c: THEME.gold },
+            { l: "P/L", v: `${sign(stock.profit)}${fmtUSD(stock.profit)}`, c: clr(stock.profit) },
+            { l: "Return", v: `${sign(stock.profitPct)}${fmt(stock.profitPct, 1)}%`, c: clr(stock.profitPct) },
+            { l: "Yield", v: `${fmt(stock.divYield, 2)}%`, c: stock.divYield > 0 ? THEME.gold : THEME.dim },
+            { l: "YoC", v: `${fmt(yoc, 2)}%`, c: yoc > 0 ? THEME.gold : THEME.dim },
+          ].map(x => (
+            <div key={x.l} style={{ background: THEME.bg, borderRadius: 6, border: `1px solid ${THEME.border}`, padding: "8px 10px" }}>
+              <div style={{ fontSize: 8, color: THEME.dim, textTransform: "uppercase", letterSpacing: 1 }}>{x.l}</div>
+              <div style={{ fontFamily: FONT_MONO, fontSize: 13, color: x.c || THEME.text, marginTop: 3 }}>{x.v}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6, marginTop: 10 }}>
+          {[
+            { l: "P/E", v: stock.pe > 0 ? fmt(stock.pe, 1) : "N/A" },
+            { l: "Beta", v: fmt(stock.beta, 2) },
+            { l: "Payout", v: `${fmt(stock.payout, 0)}%` },
+            { l: "ROE", v: `${fmt(stock.roe * 100, 1)}%` },
+          ].map(x => (
+            <div key={x.l} style={{ textAlign: "center", padding: "7px 4px", borderBottom: `1px solid ${THEME.border}` }}>
+              <div style={{ fontSize: 8, color: THEME.dim }}>{x.l}</div>
+              <div style={{ fontFamily: FONT_MONO, fontSize: 11, color: THEME.text, marginTop: 2 }}>{x.v}</div>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={() => onDeepDive?.(stock.symbol)}
+          style={{ width: "100%", marginTop: 14, background: "transparent", color: THEME.gold, border: `1px solid ${THEME.gold}`, borderRadius: 6, padding: "10px 12px", fontSize: 12, fontWeight: 600, letterSpacing: 0.5, cursor: "pointer" }}
+        >
+          Open Deep Dive
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -530,7 +632,7 @@ function DonutChart({ slices, cx = 130, cy = 130, r = 90, innerR = 52, onHover, 
 }
 
 // ── TAB 1: MATRICEA PORTOFOLIULUI ────────────────────────────────────────────
-function MatriceTab({ portfolio, totals }) {
+function MatriceTab({ portfolio, totals, onStockSelect }) {
   const [hoveredDonut1, setHoveredDonut1] = useState(null);
   const [hoveredDonut2, setHoveredDonut2] = useState(null);
   const [matSubTab, setMatSubTab] = useState("harti");
@@ -604,7 +706,7 @@ function MatriceTab({ portfolio, totals }) {
 
       {/* Sub-tab switch */}
       <div style={{ display: "flex", borderBottom: `1px solid ${THEME.border}` }}>
-        {[{ id: "harti", label: "Hărți Portofoliu" }, { id: "miscari", label: "Mișcările Zilei" }, { id: "registru", label: "Registru" }].map(t => (
+        {[{ id: "harti", label: "Allocation" }, { id: "miscari", label: "Movers" }, { id: "registru", label: "Holdings" }].map(t => (
           <button key={t.id} onClick={() => setMatSubTab(t.id)}
             style={{ flex: 1, background: "transparent", border: "none",
               borderBottom: matSubTab === t.id ? `2px solid ${THEME.gold}` : "2px solid transparent",
@@ -621,7 +723,7 @@ function MatriceTab({ portfolio, totals }) {
 
           {/* Donut 1: Harta Profitabilității */}
           <section>
-            <SectionHeader>HARTA PROFITABILITĂȚII</SectionHeader>
+            <SectionHeader>PROFIT MAP</SectionHeader>
             <Card>
               <DonutChart
                 slices={donut1Slices}
@@ -652,9 +754,9 @@ function MatriceTab({ portfolio, totals }) {
                     const secData = sectors[secName];
                     return (
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                        <div><div style={{ fontSize: 8, color: THEME.dim }}>Valoare</div><div style={{ fontFamily: FONT_MONO, fontSize: 11, color: THEME.text }}>${fmt(secData.value, 0)}</div></div>
+                        <div><div style={{ fontSize: 8, color: THEME.dim }}>Value</div><div style={{ fontFamily: FONT_MONO, fontSize: 11, color: THEME.text }}>${fmt(secData.value, 0)}</div></div>
                         <div><div style={{ fontSize: 8, color: THEME.dim }}>Profit</div><div style={{ fontFamily: FONT_MONO, fontSize: 11, color: clr(secData.profit) }}>{sign(secData.profit)}${fmt(Math.abs(secData.profit), 0)}</div></div>
-                        <div><div style={{ fontSize: 8, color: THEME.dim }}>Acțiuni</div><div style={{ fontSize: 10, color: THEME.text }}>{secData.stocks.map(s => s.symbol).join(", ")}</div></div>
+                        <div><div style={{ fontSize: 8, color: THEME.dim }}>Stocks</div><div style={{ fontSize: 10, color: THEME.text }}>{secData.stocks.map(s => s.symbol).join(", ")}</div></div>
                       </div>
                     );
                   })()}
@@ -665,7 +767,7 @@ function MatriceTab({ portfolio, totals }) {
 
           {/* Donut 2: Evoluție vs Preț Mediu */}
           <section>
-            <SectionHeader>EVOLUȚIE VS PREȚ MEDIU</SectionHeader>
+            <SectionHeader>RETURN VS COST</SectionHeader>
             <Card>
               <DonutChart
                 slices={donut2Slices}
@@ -699,11 +801,11 @@ function MatriceTab({ portfolio, totals }) {
                   <div style={{ marginTop: 10, background: THEME.bg, borderRadius: 6, padding: "10px 12px", borderLeft: `3px solid ${donut2Slices[hoveredDonut2].color}` }}>
                     <div style={{ fontSize: 11, color: THEME.text, marginBottom: 6 }}><span style={{ fontFamily: FONT_MONO, color: THEME.gold }}>{sym}</span> — {st.name}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                      <div><div style={{ fontSize: 8, color: THEME.dim }}>Preț curent</div><div style={{ fontFamily: FONT_MONO, fontSize: 11 }}>${fmt(st.price)}</div></div>
-                      <div><div style={{ fontSize: 8, color: THEME.dim }}>Cost mediu</div><div style={{ fontFamily: FONT_MONO, fontSize: 11 }}>${fmt(st.avgCost)}</div></div>
+                      <div><div style={{ fontSize: 8, color: THEME.dim }}>Price</div><div style={{ fontFamily: FONT_MONO, fontSize: 11 }}>${fmt(st.price)}</div></div>
+                      <div><div style={{ fontSize: 8, color: THEME.dim }}>Avg Cost</div><div style={{ fontFamily: FONT_MONO, fontSize: 11 }}>${fmt(st.avgCost)}</div></div>
                       <div><div style={{ fontSize: 8, color: THEME.dim }}>Return</div><div style={{ fontFamily: FONT_MONO, fontSize: 11, color: clr(st.profitPct) }}>{sign(st.profitPct)}{fmt(st.profitPct, 1)}%</div></div>
                       <div><div style={{ fontSize: 8, color: THEME.dim }}>Profit $</div><div style={{ fontFamily: FONT_MONO, fontSize: 11, color: clr(st.profit) }}>{sign(st.profit)}${fmt(Math.abs(st.profit), 0)}</div></div>
-                      <div><div style={{ fontSize: 8, color: THEME.dim }}>Pondere</div><div style={{ fontFamily: FONT_MONO, fontSize: 11 }}>{fmt((st.value / totals.value) * 100, 1)}%</div></div>
+                      <div><div style={{ fontSize: 8, color: THEME.dim }}>Weight</div><div style={{ fontFamily: FONT_MONO, fontSize: 11 }}>{fmt((st.value / totals.value) * 100, 1)}%</div></div>
                       <div><div style={{ fontSize: 8, color: THEME.dim }}>Div/An</div><div style={{ fontFamily: FONT_MONO, fontSize: 11, color: THEME.gold }}>${fmt(st.annualDiv, 0)}</div></div>
                     </div>
                   </div>
@@ -717,7 +819,7 @@ function MatriceTab({ portfolio, totals }) {
       {/* ── MIȘCĂRILE ZILEI ── */}
       {matSubTab === "miscari" && (
         <section>
-          <SectionHeader>MIȘCĂRILE ZILEI — TOP 5</SectionHeader>
+          <SectionHeader>DAILY MOVERS</SectionHeader>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div>
               <div style={{ fontSize: 9, color: THEME.green, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>▲ Creșteri</div>
@@ -750,10 +852,15 @@ function MatriceTab({ portfolio, totals }) {
       {/* ── REGISTRUL CENTRAL ── */}
       {matSubTab === "registru" && (
         <section>
-          <SectionHeader>REGISTRUL CENTRAL</SectionHeader>
+          <SectionHeader>HOLDINGS</SectionHeader>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {[...portfolio].sort((a, b) => b.value - a.value).map(s => (
-              <Card key={s.symbol}>
+              <Card key={s.symbol} style={{ cursor: "pointer" }}>
+                <button
+                  onClick={() => onStockSelect?.(s)}
+                  style={{ all: "unset", display: "block", width: "100%", cursor: "pointer" }}
+                  title={`Open ${s.symbol} details`}
+                >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
                   <div>
                     <div style={{ fontFamily: FONT_MONO, fontSize: 14, color: THEME.gold }}>{s.symbol}</div>
@@ -766,11 +873,11 @@ function MatriceTab({ portfolio, totals }) {
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4 }}>
                   {[
-                    { l: "Valoare", v: fmtUSD(s.value) },
+                    { l: "Value", v: fmtUSD(s.value) },
                     { l: "Profit $", v: `${sign(s.profit)}${fmtUSD(s.profit)}`, c: clr(s.profit) },
                     { l: "Return %", v: `${sign(s.profitPct)}${fmt(s.profitPct, 1)}%`, c: clr(s.profitPct) },
-                    { l: "Acțiuni", v: s.shares },
-                    { l: "Cost Med.", v: `$${fmt(s.avgCost)}` },
+                    { l: "Shares", v: s.shares },
+                    { l: "Avg Cost", v: `$${fmt(s.avgCost)}` },
                     { l: "P/E", v: s.pe > 0 ? fmt(s.pe, 1) : "N/A" },
                   ].map(x => (
                     <div key={x.l} style={{ background: THEME.bg, borderRadius: 5, padding: "5px 7px" }}>
@@ -779,6 +886,7 @@ function MatriceTab({ portfolio, totals }) {
                     </div>
                   ))}
                 </div>
+                </button>
               </Card>
             ))}
           </div>
@@ -816,18 +924,18 @@ function DiagTab({ portfolio, totals }) {
   }, [portfolio, totals]);
 
   const flags = [
-    { label: "Evaluare Excesivă (P/E > 35)", color: THEME.gold, items: portfolio.filter(s => s.pe > 35 && s.pe < 500).sort((a, b) => b.pe - a.pe), val: s => `P/E ${s.pe.toFixed(1)}` },
-    { label: "Risc Tăiere Dividend (Payout > 80%)", color: THEME.red, items: portfolio.filter(s => s.payout > 80 && s.annualDiv > 0 && s.sector !== "Real Estate").sort((a, b) => b.payout - a.payout), val: s => `${s.payout.toFixed(0)}%` },
-    { label: "Volatilitate Ridicată (Beta > 1.5)", color: THEME.blue, items: portfolio.filter(s => s.beta > 1.5).sort((a, b) => b.beta - a.beta), val: s => `β ${s.beta.toFixed(2)}` },
-    { label: "Lichiditate Scăzută (CR < 1)", color: THEME.red, items: portfolio.filter(s => s.currentRatio > 0 && s.currentRatio < 1 && s.sector !== "Financials").sort((a, b) => a.currentRatio - b.currentRatio), val: s => `CR ${s.currentRatio.toFixed(2)}` },
-    { label: "Marjă Profit Negativă", color: THEME.red, items: portfolio.filter(s => s.profitMargin < 0), val: s => `${(s.profitMargin * 100).toFixed(1)}%` },
-    { label: "Concentrare Excesivă (> 15%)", color: THEME.gold, items: portfolio.filter(s => (s.value / totals.value) * 100 > 15).sort((a, b) => b.value - a.value), val: s => `${((s.value / totals.value) * 100).toFixed(1)}%` },
+    { label: "High Valuation (P/E > 35)", color: THEME.gold, items: portfolio.filter(s => s.pe > 35 && s.pe < 500).sort((a, b) => b.pe - a.pe), val: s => `P/E ${s.pe.toFixed(1)}` },
+    { label: "Dividend Cut Risk (Payout > 80%)", color: THEME.red, items: portfolio.filter(s => s.payout > 80 && s.annualDiv > 0 && s.sector !== "Real Estate").sort((a, b) => b.payout - a.payout), val: s => `${s.payout.toFixed(0)}%` },
+    { label: "High Volatility (Beta > 1.5)", color: THEME.blue, items: portfolio.filter(s => s.beta > 1.5).sort((a, b) => b.beta - a.beta), val: s => `β ${s.beta.toFixed(2)}` },
+    { label: "Low Liquidity (CR < 1)", color: THEME.red, items: portfolio.filter(s => s.currentRatio > 0 && s.currentRatio < 1 && s.sector !== "Financials").sort((a, b) => a.currentRatio - b.currentRatio), val: s => `CR ${s.currentRatio.toFixed(2)}` },
+    { label: "Negative Margin", color: THEME.red, items: portfolio.filter(s => s.profitMargin < 0), val: s => `${(s.profitMargin * 100).toFixed(1)}%` },
+    { label: "High Concentration (> 15%)", color: THEME.gold, items: portfolio.filter(s => (s.value / totals.value) * 100 > 15).sort((a, b) => b.value - a.value), val: s => `${((s.value / totals.value) * 100).toFixed(1)}%` },
   ];
 
   return (
     <div style={{ padding: "16px 12px", display: "flex", flexDirection: "column", gap: 16 }}>
       <Card accent={THEME.gold}>
-        <SectionHeader>DIAGNOZĂ NARATIVĂ — CLAUDE AI</SectionHeader>
+        <SectionHeader>AI DIAGNOSIS</SectionHeader>
         <button onClick={runAI} disabled={loading} style={{ background: "transparent", border: `1px solid ${THEME.gold}`, color: THEME.gold, borderRadius: 6, padding: "8px 14px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", marginBottom: 12, opacity: loading ? 0.6 : 1, width: "100%" }}>
           {loading ? "⏳ Se analizează portofoliul..." : "🧠 Generează Analiză AI a Portofoliului"}
         </button>
@@ -843,7 +951,7 @@ function DiagTab({ portfolio, totals }) {
         )}
       </Card>
 
-      <SectionHeader>RAPORT DE SĂNĂTATE — ALERTE AUTOMATE</SectionHeader>
+      <SectionHeader>HEALTH CHECK</SectionHeader>
       {flags.map(f => (
         <Card key={f.label} accent={f.color}>
           <div style={{ fontSize: 10, color: f.color, letterSpacing: 0.5, marginBottom: 8 }}>{f.label}</div>
@@ -897,7 +1005,7 @@ function FluxTab({ portfolio }) {
       </Card>
 
       <section>
-        <SectionHeader>PROIECȚIE FLUX LUNAR DIVIDENDE</SectionHeader>
+        <SectionHeader>MONTHLY INCOME</SectionHeader>
         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           {LUNI.map((luna, i) => {
             const val = monthly[i];
@@ -920,7 +1028,7 @@ function FluxTab({ portfolio }) {
       </section>
 
       <section>
-        <SectionHeader>DISTRIBUȚIE NOMINALĂ DIVIDENDE</SectionHeader>
+        <SectionHeader>DIVIDEND SPLIT</SectionHeader>
         {divStocks.map(s => (
           <div key={s.symbol} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${THEME.border}` }}>
             <div>
@@ -936,7 +1044,7 @@ function FluxTab({ portfolio }) {
       </section>
 
       <section>
-        <SectionHeader>RADAR EVENIMENTE FINANCIARE</SectionHeader>
+        <SectionHeader>EVENT RADAR</SectionHeader>
         <Card>
           <div style={{ fontSize: 11, color: THEME.dim, marginBottom: 10 }}>Date aproximative — verificați brokerul pentru confirmare</div>
           {portfolio.map(s => (
@@ -976,7 +1084,7 @@ function RebalTab({ portfolio, totals }) {
 
   return (
     <div style={{ padding: "16px 12px", display: "flex", flexDirection: "column", gap: 16 }}>
-      <SectionHeader>ALGORITM DE OPTIMIZARE PERSONALIZAT</SectionHeader>
+      <SectionHeader>REBALANCE ENGINE</SectionHeader>
 
       <Card>
         <div style={{ fontSize: 10, color: THEME.dim, marginBottom: 6 }}>CAPITAL NOU (DCA) $</div>
@@ -997,7 +1105,7 @@ function RebalTab({ portfolio, totals }) {
       </div>
 
       <section>
-        <SectionHeader>PONDERI CURENTE VS ȚINTĂ</SectionHeader>
+        <SectionHeader>CURRENT VS TARGET</SectionHeader>
         {portfolio.map(s => {
           const currentPct = (s.value / totals.value) * 100;
           return (
@@ -1027,7 +1135,7 @@ function RebalTab({ portfolio, totals }) {
 
       {Math.abs(sumaTargets - 100) <= 0.1 && suggestions.length > 0 && (
         <section>
-          <SectionHeader>VECTORI DE ACHIZIȚIE</SectionHeader>
+          <SectionHeader>BUY LIST</SectionHeader>
           {suggestions.map(s => (
             <div key={s.symbol} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${THEME.border}` }}>
               <div>
@@ -1047,7 +1155,7 @@ function RebalTab({ portfolio, totals }) {
 }
 
 // ── TAB 5: WATCHLIST ──────────────────────────────────────────────────────────
-function WatchlistTab({ portfolio, totals }) {
+function WatchlistTab({ portfolio, totals, onStockSelect }) {
   const [minScore, setMinScore] = useState(35);
   const medianWeight = [...portfolio].sort((a, b) => a.value - b.value)[Math.floor(portfolio.length / 2)]?.value / totals.value * 100 || 5;
 
@@ -1056,45 +1164,45 @@ function WatchlistTab({ portfolio, totals }) {
     const discount = ((s.avgCost - s.price) / s.avgCost) * 100;
     let score = 0;
     const reasons = [];
-    if (discount > 0) { score += Math.min(28, discount * 1.4); reasons.push(`sub cost cu ${discount.toFixed(1)}%`); }
-    else if (s.profitPct < 5) { score += 5; reasons.push("aproape de cost mediu"); }
-    if (s.pe > 0 && s.pe <= 15) { score += 20; reasons.push("P/E atractiv"); }
-    else if (s.pe <= 25) { score += 12; reasons.push("P/E rezonabil"); }
+    if (discount > 0) { score += Math.min(28, discount * 1.4); reasons.push(`${discount.toFixed(1)}% below cost`); }
+    else if (s.profitPct < 5) { score += 5; reasons.push("near avg cost"); }
+    if (s.pe > 0 && s.pe <= 15) { score += 20; reasons.push("attractive P/E"); }
+    else if (s.pe <= 25) { score += 12; reasons.push("fair P/E"); }
     else if (s.pe <= 35) { score += 5; }
-    if (s.divYield >= 4) { score += 15; reasons.push("yield ridicat"); }
-    else if (s.divYield >= 2) { score += 9; reasons.push("yield decent"); }
+    if (s.divYield >= 4) { score += 15; reasons.push("high yield"); }
+    else if (s.divYield >= 2) { score += 9; reasons.push("solid yield"); }
     else if (s.divYield > 0) { score += 4; }
     if (s.divYield > 0) {
       if (s.sector === "Real Estate") { score += 8; reasons.push("REIT"); }
-      else if (s.payout <= 65) { score += 14; reasons.push("payout sănătos"); }
+      else if (s.payout <= 65) { score += 14; reasons.push("healthy payout"); }
       else if (s.payout <= 85) { score += 7; }
     }
-    if (s.dailyChg < 0) { score += Math.min(10, Math.abs(s.dailyChg) * 2); reasons.push("slăbiciune zilnică"); }
-    if (weight <= medianWeight) { score += 6; reasons.push("pondere sub mediană"); }
+    if (s.dailyChg < 0) { score += Math.min(10, Math.abs(s.dailyChg) * 2); reasons.push("daily weakness"); }
+    if (weight <= medianWeight) { score += 6; reasons.push("below median weight"); }
     score = Math.min(100, Math.round(score));
     return { ...s, score, reasons: reasons.slice(0, 3), discount, weight };
   }).filter(s => s.score >= minScore).sort((a, b) => b.score - a.score);
 
   const getSignal = (score) => {
-    if (score >= 70) return { label: "Prioritate Mare", color: THEME.green, bg: "rgba(46,204,113,0.12)" };
-    if (score >= 50) return { label: "De Urmărit", color: THEME.gold, bg: "rgba(232,196,104,0.12)" };
-    return { label: "Candidat", color: THEME.blue, bg: "rgba(74,158,255,0.12)" };
+    if (score >= 70) return { label: "High Priority", color: THEME.green, bg: "rgba(46,204,113,0.12)" };
+    if (score >= 50) return { label: "Watch", color: THEME.gold, bg: "rgba(232,196,104,0.12)" };
+    return { label: "Candidate", color: THEME.blue, bg: "rgba(74,158,255,0.12)" };
   };
 
   return (
     <div style={{ padding: "16px 12px", display: "flex", flexDirection: "column", gap: 16 }}>
-      <SectionHeader>WATCHLIST — OPORTUNITĂȚI DCA</SectionHeader>
+      <SectionHeader>DCA WATCHLIST</SectionHeader>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 10, color: THEME.dim, flexShrink: 0 }}>Scor minim:</span>
+        <span style={{ fontSize: 10, color: THEME.dim, flexShrink: 0 }}>Min score:</span>
         <input type="range" min={0} max={100} step={5} value={minScore} onChange={e => setMinScore(Number(e.target.value))} style={{ flex: 1 }} />
         <span style={{ fontFamily: FONT_MONO, fontSize: 12, color: THEME.gold, width: 30 }}>{minScore}</span>
       </div>
 
       <div style={{ display: "flex", gap: 8 }}>
         {[
-          { l: "Candidați", v: scored.length },
-          { l: "Scor Max", v: scored[0]?.score || 0 },
+          { l: "Candidates", v: scored.length },
+          { l: "Top Score", v: scored[0]?.score || 0 },
           { l: "Sub Cost", v: scored.filter(s => s.discount > 0).length },
         ].map(x => (
           <div key={x.l} style={{ flex: 1, background: THEME.surface, borderRadius: 8, border: `1px solid ${THEME.border}`, padding: "10px", textAlign: "center" }}>
@@ -1107,7 +1215,12 @@ function WatchlistTab({ portfolio, totals }) {
       {scored.map(s => {
         const sig = getSignal(s.score);
         return (
-          <Card key={s.symbol}>
+          <Card key={s.symbol} style={{ cursor: "pointer" }}>
+            <button
+              onClick={() => onStockSelect?.(s)}
+              style={{ all: "unset", display: "block", width: "100%", cursor: "pointer" }}
+              title={`Open ${s.symbol} details`}
+            >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontFamily: FONT_MONO, fontSize: 14, color: THEME.text }}>{s.symbol}</span>
@@ -1120,12 +1233,12 @@ function WatchlistTab({ portfolio, totals }) {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 8 }}>
               {[
-                { l: "Preț Live", v: `$${fmt(s.price)}` },
-                { l: "Cost Mediu", v: `$${fmt(s.avgCost)}` },
+                { l: "Live Price", v: `$${fmt(s.price)}` },
+                { l: "Avg Cost", v: `$${fmt(s.avgCost)}` },
                 { l: "P/E", v: s.pe > 0 ? s.pe.toFixed(1) : "N/A" },
                 { l: "Div Yield", v: `${s.divYield.toFixed(2)}%` },
                 { l: "Discount", v: s.discount > 0 ? `${s.discount.toFixed(1)}%` : "—", c: s.discount > 0 ? THEME.green : THEME.dim },
-                { l: "Pondere", v: `${s.weight.toFixed(1)}%` },
+                { l: "Weight", v: `${s.weight.toFixed(1)}%` },
               ].map(x => (
                 <div key={x.l} style={{ background: THEME.bg, borderRadius: 5, padding: "5px 8px" }}>
                   <div style={{ fontSize: 8, color: THEME.dim }}>{x.l}</div>
@@ -1134,6 +1247,7 @@ function WatchlistTab({ portfolio, totals }) {
               ))}
             </div>
             {s.reasons.length > 0 && <div style={{ fontSize: 10, color: THEME.dim }}>{s.reasons.join(" · ")}</div>}
+            </button>
           </Card>
         );
       })}
@@ -1855,9 +1969,16 @@ function VaRDistribution({ returns }) {
   );
 }
 
-function DeepDiveTab({ portfolio, totals }) {
+function DeepDiveTab({ portfolio, totals, focusSymbol }) {
   const [selected, setSelected] = useState(portfolio[0]?.symbol || "");
   const [deepSubTab, setDeepSubTab] = useState("tehnic");
+
+  useEffect(() => {
+    if (focusSymbol && portfolio.some(p => p.symbol === focusSymbol)) {
+      setSelected(focusSymbol);
+      setDeepSubTab("tehnic");
+    }
+  }, [focusSymbol, portfolio]);
 
   const s = portfolio.find(p => p.symbol === selected) || portfolio[0];
   if (!s) return null;
@@ -1878,12 +1999,12 @@ function DeepDiveTab({ portfolio, totals }) {
   ];
 
   const radarItems = [
-    { label: "Profitabilitate", score: Math.min(100, s.profitMargin * 400) },
+    { label: "Profitability", score: Math.min(100, s.profitMargin * 400) },
     { label: "ROE", score: Math.min(100, s.roe * 200) },
-    { label: "Stabilitate (β)", score: Math.max(0, 100 - (s.beta - 0.5) * 66) },
-    { label: "Evaluare (P/E)", score: s.pe > 0 ? Math.max(0, 100 - (s.pe - 10) * 2.5) : 50 },
-    { label: "Randament Div.", score: Math.min(100, s.divYield * 12) },
-    { label: "Lichiditate", score: Math.min(100, s.currentRatio * 40) },
+    { label: "Stability (β)", score: Math.max(0, 100 - (s.beta - 0.5) * 66) },
+    { label: "Valuation (P/E)", score: s.pe > 0 ? Math.max(0, 100 - (s.pe - 10) * 2.5) : 50 },
+    { label: "Div. Yield", score: Math.min(100, s.divYield * 12) },
+    { label: "Liquidity", score: Math.min(100, s.currentRatio * 40) },
   ];
 
   const low52 = closes.length > 0 ? Math.min(...closes) : s.price * 0.78;
@@ -1891,15 +2012,15 @@ function DeepDiveTab({ portfolio, totals }) {
   const posInRange = ((s.price - low52) / (high52 - low52)) * 100;
 
   const subTabs = [
-    { id: "tehnic", label: "Tehnic" },
-    { id: "financiar", label: "Financiar" },
-    { id: "risc", label: "Risc" },
-    { id: "pozitie", label: "Poziție" },
+    { id: "tehnic", label: "Chart" },
+    { id: "financiar", label: "Financials" },
+    { id: "risc", label: "Risk" },
+    { id: "pozitie", label: "Position" },
   ];
 
   return (
     <div style={{ padding: "16px 12px", display: "flex", flexDirection: "column", gap: 14 }}>
-      <SectionHeader>ANALIZĂ DETALIATĂ PER ACTIV</SectionHeader>
+      <SectionHeader>STOCK DEEP DIVE</SectionHeader>
 
       {/* Selector ticker */}
       <select
@@ -2048,7 +2169,7 @@ function DeepDiveTab({ portfolio, totals }) {
 
           {/* Scorecard */}
           <section>
-            <SectionHeader>SCORECARD FINANCIAR</SectionHeader>
+            <SectionHeader>FINANCIAL SCORECARD</SectionHeader>
             <Card>
               {scorecard.map((item, i) => (
                 <div key={item.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: i < scorecard.length - 1 ? `1px solid ${THEME.border}` : "none" }}>
@@ -2071,7 +2192,7 @@ function DeepDiveTab({ portfolio, totals }) {
 
           {/* EPS Proiecție */}
           <section>
-            <SectionHeader>PROIECȚIE EPS</SectionHeader>
+            <SectionHeader>EPS OUTLOOK</SectionHeader>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <Card accent={THEME.blue}>
                 <div style={{ fontSize: 9, color: THEME.dim, marginBottom: 4 }}>EPS ISTORIC (TTM)</div>
@@ -2098,7 +2219,7 @@ function DeepDiveTab({ portfolio, totals }) {
           {/* Dividend info */}
           {s.divYield > 0 && (
             <section>
-              <SectionHeader>DETALII DIVIDEND</SectionHeader>
+              <SectionHeader>DIVIDEND DETAILS</SectionHeader>
               <Card accent={THEME.gold}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                   {[
@@ -2131,7 +2252,7 @@ function DeepDiveTab({ portfolio, totals }) {
 
           {/* ── ISTORICUL PREȚULUI 365 ZILE ── */}
           <section>
-            <SectionHeader>ISTORICUL PREȚULUI (365 ZILE)</SectionHeader>
+            <SectionHeader>PRICE HISTORY</SectionHeader>
             <Card>
               <PriceHistoryChart closes={closes} avgCost={s.avgCost} />
             </Card>
@@ -2140,7 +2261,7 @@ function DeepDiveTab({ portfolio, totals }) {
           {/* ── CANAL FCF vs DIVIDEND/SHARE ── */}
           {s.divYield > 0 && (
             <section>
-              <SectionHeader>CANAL FCF vs DIVIDEND / SHARE</SectionHeader>
+              <SectionHeader>FCF VS DIVIDEND</SectionHeader>
               <Card>
                 <FCFDividendChart stock={s} />
                 <div style={{ marginTop: 10, background: THEME.bg, borderRadius: 6, padding: "8px 10px", borderLeft: `3px solid ${s.payout < 60 ? THEME.green : s.payout < 80 ? THEME.gold : THEME.red}` }}>
@@ -2159,7 +2280,7 @@ function DeepDiveTab({ portfolio, totals }) {
 
           {/* ── EVOLUȚIE VENITURI ── */}
           <section>
-            <SectionHeader>EVOLUȚIE VENITURI</SectionHeader>
+            <SectionHeader>REVENUE TREND</SectionHeader>
             <Card>
               <RevenueChart stock={s} />
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginTop: 10 }}>
@@ -2179,7 +2300,7 @@ function DeepDiveTab({ portfolio, totals }) {
 
           {/* ── MONITORIZARE BUYBACK ── */}
           <section>
-            <SectionHeader>MONITORIZARE BUYBACK</SectionHeader>
+            <SectionHeader>BUYBACK TRACKER</SectionHeader>
             <Card>
               <BuybackChart stock={s} />
               <div style={{ marginTop: 10, background: THEME.bg, borderRadius: 6, padding: "8px 10px", borderLeft: `3px solid ${THEME.blue}` }}>
@@ -2209,7 +2330,7 @@ function DeepDiveTab({ portfolio, totals }) {
 
           {/* Radar performanță */}
           <section>
-            <SectionHeader>RADAR PERFORMANȚĂ MULTIDIMENSIONAL</SectionHeader>
+            <SectionHeader>PERFORMANCE RADAR</SectionHeader>
             <Card>
               {radarItems.map(item => (
                 <div key={item.label} style={{ marginBottom: 12 }}>
@@ -2239,7 +2360,7 @@ function DeepDiveTab({ portfolio, totals }) {
 
           {/* VaR & Risk Metrics */}
           <section>
-            <SectionHeader>DISTRIBUȚIE RANDAMENTE & RISK METRICS</SectionHeader>
+            <SectionHeader>RISK METRICS</SectionHeader>
             <Card>
               {returns.length >= 20 ? (
                 <VaRDistribution returns={returns} />
@@ -2253,15 +2374,15 @@ function DeepDiveTab({ portfolio, totals }) {
 
           {/* Factori de risc */}
           <section>
-            <SectionHeader>FACTORI DE RISC IDENTIFICAȚI</SectionHeader>
+            <SectionHeader>RISK FLAGS</SectionHeader>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {[
-                { cond: s.pe > 35 && s.pe < 500, label: "Evaluare Excesivă", desc: `P/E de ${s.pe.toFixed(1)} depășește 35x`, color: THEME.gold },
-                { cond: s.payout > 80 && s.divYield > 0 && s.sector !== "Real Estate", label: "Risc Tăiere Dividend", desc: `Payout de ${s.payout.toFixed(0)}% poate fi nesustenabil`, color: THEME.red },
-                { cond: s.beta > 1.5, label: "Volatilitate Ridicată", desc: `Beta de ${s.beta.toFixed(2)} indică volatilitate mare față de piață`, color: THEME.blue },
-                { cond: s.currentRatio < 1 && s.sector !== "Financials", label: "Lichiditate Scăzută", desc: `Current Ratio ${s.currentRatio.toFixed(2)} sub 1.0`, color: THEME.red },
-                { cond: s.profitMargin < 0, label: "Marjă Negativă", desc: `Compania operează în pierdere`, color: THEME.red },
-                { cond: (s.value / totals.value) * 100 > 15, label: "Concentrare Excesivă", desc: `Pondere de ${((s.value/totals.value)*100).toFixed(1)}% în portofoliu`, color: THEME.gold },
+                { cond: s.pe > 35 && s.pe < 500, label: "High Valuation", desc: `P/E ${s.pe.toFixed(1)} is above 35x`, color: THEME.gold },
+                { cond: s.payout > 80 && s.divYield > 0 && s.sector !== "Real Estate", label: "Dividend Cut Risk", desc: `${s.payout.toFixed(0)}% payout may be stretched`, color: THEME.red },
+                { cond: s.beta > 1.5, label: "High Volatility", desc: `Beta ${s.beta.toFixed(2)} is high versus market`, color: THEME.blue },
+                { cond: s.currentRatio < 1 && s.sector !== "Financials", label: "Low Liquidity", desc: `Current Ratio ${s.currentRatio.toFixed(2)} is below 1.0`, color: THEME.red },
+                { cond: s.profitMargin < 0, label: "Negative Margin", desc: "Company is operating at a loss", color: THEME.red },
+                { cond: (s.value / totals.value) * 100 > 15, label: "High Concentration", desc: `${((s.value/totals.value)*100).toFixed(1)}% portfolio weight`, color: THEME.gold },
               ].filter(r => r.cond).map(r => (
                 <div key={r.label} style={{ background: THEME.bg, borderLeft: `3px solid ${r.color}`, borderRadius: "0 6px 6px 0", padding: "10px 12px" }}>
                   <div style={{ fontSize: 11, color: r.color, fontWeight: 500 }}>{r.label}</div>
@@ -2292,18 +2413,18 @@ function DeepDiveTab({ portfolio, totals }) {
 
           {/* Detalii poziție */}
           <section>
-            <SectionHeader>DETALII POZIȚIE</SectionHeader>
+            <SectionHeader>POSITION DETAILS</SectionHeader>
             <Card accent={THEME.gold}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 {[
-                  { l: "Valoare Actuală", v: fmtUSD(s.value), c: THEME.text },
-                  { l: "Valoare Investită", v: fmtUSD(s.invested), c: THEME.dim },
+                  { l: "Market Value", v: fmtUSD(s.value), c: THEME.text },
+                  { l: "Invested", v: fmtUSD(s.invested), c: THEME.dim },
                   { l: "Profit Net ($)", v: `${sign(s.profit)}${fmtUSD(s.profit)}`, c: clr(s.profit) },
                   { l: "Return (%)", v: `${sign(s.profitPct)}${fmt(s.profitPct, 2)}%`, c: clr(s.profitPct) },
-                  { l: "Nr. Acțiuni", v: s.shares, c: THEME.text },
-                  { l: "Preț Mediu", v: `$${fmt(s.avgCost)}`, c: THEME.text },
-                  { l: "Preț Curent", v: `$${fmt(s.price)}`, c: clr(s.dailyChg) },
-                  { l: "Pondere Port.", v: `${fmt((s.value / totals.value) * 100, 2)}%`, c: THEME.gold },
+                  { l: "Shares", v: s.shares, c: THEME.text },
+                  { l: "Avg Cost", v: `$${fmt(s.avgCost)}`, c: THEME.text },
+                  { l: "Price", v: `$${fmt(s.price)}`, c: clr(s.dailyChg) },
+                  { l: "Weight", v: `${fmt((s.value / totals.value) * 100, 2)}%`, c: THEME.gold },
                 ].map(x => (
                   <div key={x.l} style={{ background: THEME.bg, borderRadius: 6, padding: "8px 10px" }}>
                     <div style={{ fontSize: 8, color: THEME.dim }}>{x.l}</div>
@@ -2316,7 +2437,7 @@ function DeepDiveTab({ portfolio, totals }) {
 
           {/* Breakeven analysis */}
           <section>
-            <SectionHeader>ANALIZĂ BREAKEVEN</SectionHeader>
+            <SectionHeader>BREAKEVEN</SectionHeader>
             <Card>
               {(() => {
                 const gap = s.price - s.avgCost;
@@ -2325,9 +2446,9 @@ function DeepDiveTab({ portfolio, totals }) {
                 const toBreakPct = gap < 0 ? Math.abs(gapPct) : 0;
                 return (
                   <>
-                    <MetricRow label="Diferență față de cost" value={`${sign(gap)}$${Math.abs(gap).toFixed(2)}`} color={clr(gap)} />
-                    <MetricRow label="Return vs cost mediu" value={`${sign(gapPct)}${gapPct.toFixed(2)}%`} color={clr(gapPct)} />
-                    {toBreak > 0 && <MetricRow label="Necesar la breakeven" value={`+$${toBreak.toFixed(2)} (+${toBreakPct.toFixed(1)}%)`} color={THEME.gold} />}
+                    <MetricRow label="Price vs cost" value={`${sign(gap)}$${Math.abs(gap).toFixed(2)}`} color={clr(gap)} />
+                    <MetricRow label="Return vs cost" value={`${sign(gapPct)}${gapPct.toFixed(2)}%`} color={clr(gapPct)} />
+                    {toBreak > 0 && <MetricRow label="To breakeven" value={`+$${toBreak.toFixed(2)} (+${toBreakPct.toFixed(1)}%)`} color={THEME.gold} />}
                     {s.divYield > 0 && <MetricRow label="YoC (Yield on Cost)" value={`${((s.annualDiv / s.invested) * 100).toFixed(2)}%`} color={THEME.gold} />}
                     <div style={{ marginTop: 10 }}>
                       <div style={{ fontSize: 9, color: THEME.dim, marginBottom: 4 }}>Recuperare investiție prin dividende</div>
@@ -2354,7 +2475,7 @@ function DeepDiveTab({ portfolio, totals }) {
 
           {/* Scenarii DCA */}
           <section>
-            <SectionHeader>SCENARII ACHIZIȚIE ADIȚIONALĂ</SectionHeader>
+            <SectionHeader>DCA SCENARIOS</SectionHeader>
             <Card>
               <div style={{ fontSize: 10, color: THEME.dim, marginBottom: 10 }}>Impact DCA la prețul curent de ${fmt(s.price)}</div>
               {[100, 250, 500, 1000].map(cap => {
@@ -2381,7 +2502,7 @@ function DeepDiveTab({ portfolio, totals }) {
 
           {/* Evoluție zilnică vs portofoliu */}
           <section>
-            <SectionHeader>CONTRIBUȚIE LA MIȘCAREA ZILNICĂ</SectionHeader>
+            <SectionHeader>DAILY CONTRIBUTION</SectionHeader>
             <Card>
               {(() => {
                 const stockDailyUSD = s.prevValue * (s.dailyChg / 100);
@@ -2389,11 +2510,11 @@ function DeepDiveTab({ portfolio, totals }) {
                 const contribution = portDailyUSD !== 0 ? (stockDailyUSD / portDailyUSD) * 100 : 0;
                 return (
                   <>
-                    <MetricRow label="Mișcare activ ($)" value={`${sign(stockDailyUSD)}$${Math.abs(stockDailyUSD).toFixed(2)}`} color={clr(stockDailyUSD)} />
-                    <MetricRow label="Variație zilnică (%)" value={`${sign(s.dailyChg)}${fmt(s.dailyChg, 2)}%`} color={clr(s.dailyChg)} />
-                    <MetricRow label="Contribuție la port." value={`${sign(contribution)}${Math.abs(contribution).toFixed(1)}%`} color={clr(contribution)} />
+                    <MetricRow label="Stock move ($)" value={`${sign(stockDailyUSD)}$${Math.abs(stockDailyUSD).toFixed(2)}`} color={clr(stockDailyUSD)} />
+                    <MetricRow label="Daily change (%)" value={`${sign(s.dailyChg)}${fmt(s.dailyChg, 2)}%`} color={clr(s.dailyChg)} />
+                    <MetricRow label="Portfolio impact" value={`${sign(contribution)}${Math.abs(contribution).toFixed(1)}%`} color={clr(contribution)} />
                     <div style={{ marginTop: 10 }}>
-                      <div style={{ fontSize: 9, color: THEME.dim, marginBottom: 4 }}>Contribuție la mișcarea totală a zilei</div>
+                      <div style={{ fontSize: 9, color: THEME.dim, marginBottom: 4 }}>Contribution to today's move</div>
                       <div style={{ height: 8, background: THEME.border, borderRadius: 4, position: "relative", overflow: "hidden" }}>
                         <div style={{
                           position: "absolute",
@@ -2426,7 +2547,7 @@ function AlerteTab({ portfolio, alerts, setAlerts }) {
 
   return (
     <div style={{ padding: "16px 12px", display: "flex", flexDirection: "column", gap: 16 }}>
-      <SectionHeader>SISTEM ALERTE PREȚ</SectionHeader>
+      <SectionHeader>PRICE ALERTS</SectionHeader>
 
       {triggered.length > 0 && (
         <Card accent={THEME.gold}>
@@ -2446,13 +2567,13 @@ function AlerteTab({ portfolio, alerts, setAlerts }) {
         </Card>
       )}
 
-      <div style={{ fontSize: 10, color: THEME.dim, marginBottom: -8 }}>Lasă 0 pentru a dezactiva alerta</div>
+      <div style={{ fontSize: 10, color: THEME.dim, marginBottom: -8 }}>Use 0 to disable an alert</div>
 
       {portfolio.map(s => {
         const a = alerts[s.symbol] || { buy: 0, sell: 0 };
-        const status = a.buy > 0 && s.price <= a.buy ? "▲ DECLANȘAT BUY" :
-                       a.sell > 0 && s.price >= a.sell ? "▼ DECLANȘAT SELL" :
-                       (a.buy > 0 || a.sell > 0) ? "◉ Armat" : "— Inactiv";
+                const status = a.buy > 0 && s.price <= a.buy ? "▲ BUY TRIGGERED" :
+                       a.sell > 0 && s.price >= a.sell ? "▼ SELL TRIGGERED" :
+                       (a.buy > 0 || a.sell > 0) ? "◉ Armed" : "— Inactive";
         const statusColor = status.includes("BUY") ? THEME.green : status.includes("SELL") ? THEME.red : status.includes("Armat") ? THEME.gold : THEME.dim;
 
         return (
@@ -2466,7 +2587,7 @@ function AlerteTab({ portfolio, alerts, setAlerts }) {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <div>
-                <div style={{ fontSize: 9, color: THEME.green, marginBottom: 3 }}>CUMPĂRĂ SUB $</div>
+                <div style={{ fontSize: 9, color: THEME.green, marginBottom: 3 }}>BUY BELOW $</div>
                 <input
                   type="number"
                   value={a.buy || ""}
@@ -2477,7 +2598,7 @@ function AlerteTab({ portfolio, alerts, setAlerts }) {
                 />
               </div>
               <div>
-                <div style={{ fontSize: 9, color: THEME.red, marginBottom: 3 }}>VINDE PESTE $</div>
+                <div style={{ fontSize: 9, color: THEME.red, marginBottom: 3 }}>SELL ABOVE $</div>
                 <input
                   type="number"
                   value={a.sell || ""}
@@ -2499,6 +2620,8 @@ function AlerteTab({ portfolio, alerts, setAlerts }) {
 export default function App() {
   const [tab, setTab] = useState("matrice");
   const [isDark, setIsDark] = useState(true);
+  const [sheetStock, setSheetStock] = useState(null);
+  const [deepDiveFocus, setDeepDiveFocus] = useState(null);
   const [alerts, setAlerts] = useState(() => {
     const a = {};
     PORTFOLIO_DATA.forEach(s => { a[s.symbol] = { buy: 0, sell: 0 }; });
@@ -2532,6 +2655,13 @@ export default function App() {
 
   const liveCount = portfolio.filter(s => s.isLive).length;
 
+  const openStockSheet = useCallback((stock) => setSheetStock(stock), []);
+  const openDeepDive = useCallback((symbol) => {
+    setSheetStock(null);
+    setDeepDiveFocus(symbol);
+    setTab("deepdive");
+  }, []);
+
   return (
     <ThemeCtx.Provider value={{ isDark, toggleTheme }}>
       <div style={{
@@ -2558,14 +2688,15 @@ export default function App() {
 
         <div style={{ paddingTop: 8 }} />
 
-        {tab === "matrice"   && <MatriceTab   portfolio={portfolio} totals={totals} />}
+        {tab === "matrice"   && <MatriceTab   portfolio={portfolio} totals={totals} onStockSelect={openStockSheet} />}
         {tab === "diagnoza"  && <DiagTab      portfolio={portfolio} totals={totals} />}
         {tab === "fluxuri"   && <FluxTab      portfolio={portfolio} />}
         {tab === "rebal"     && <RebalTab     portfolio={portfolio} totals={totals} />}
-        {tab === "watchlist" && <WatchlistTab portfolio={portfolio} totals={totals} />}
-        {tab === "deepdive"  && <DeepDiveTab  portfolio={portfolio} totals={totals} />}
+        {tab === "watchlist" && <WatchlistTab portfolio={portfolio} totals={totals} onStockSelect={openStockSheet} />}
+        {tab === "deepdive"  && <DeepDiveTab  portfolio={portfolio} totals={totals} focusSymbol={deepDiveFocus} />}
         {tab === "alerte"    && <AlerteTab    portfolio={portfolio} alerts={alerts} setAlerts={setAlerts} />}
 
+        <StockDetailSheet stock={sheetStock} totals={totals} onClose={() => setSheetStock(null)} onDeepDive={openDeepDive} />
         <BottomNav active={tab} onChange={setTab} alertCount={alertCount} />
       </div>
     </ThemeCtx.Provider>
